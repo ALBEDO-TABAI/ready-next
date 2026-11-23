@@ -1,11 +1,13 @@
-import { BrowserWindow, nativeTheme } from 'electron'
+import { BrowserWindow, nativeTheme, systemPreferences } from 'electron'
 import {
   renderStartupSplashMarkup,
   STARTUP_SPLASH_FINISH,
   STARTUP_SPLASH_FINISH_EVENT,
   STARTUP_SPLASH_SIZE,
+  STARTUP_SPLASH_SLAB,
   type StartupSplashTheme,
 } from '../shared/startup-splash-markup'
+import { loadStartupGlass, STARTUP_GLASS_CALM_MS, STARTUP_GLASS_RIM, STARTUP_GLASS_RIPPLE, type StartupGlass } from './startup-glass'
 
 /**
  * 启动动画窗口的唯一状态源。
@@ -33,6 +35,8 @@ const STARTUP_SPLASH_EXIT_FADE_MS = STARTUP_SPLASH_FINISH.fadeMs
 let startupSplashWindow: BrowserWindow | null = null
 let startupSplashFinishing = false
 let startupSplashShownAtMs: number | null = null
+// The native glass and water under the page (macOS 26+, plan §6); null when the page draws its own glass.
+let startupGlass: StartupGlass | null = null
 
 export function getStartupSplashWindow(): BrowserWindow | null {
   return startupSplashWindow
@@ -54,7 +58,7 @@ export async function createStartupSplashWindow(): Promise<void> {
 
   startupSplashFinishing = false
   startupSplashShownAtMs = null
-  // 设置库此时还没打开，读不到应用自己的主题：字标的墨色跟随系统外观（玻璃本身无色）。
+  // 设置库此时还没打开，读不到应用自己的主题：点的颜色跟随系统外观（玻璃本身无色，字标两种外观都是白色发光）。
   const theme: StartupSplashTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const splashWindow = new BrowserWindow({
     width: STARTUP_SPLASH_SIZE.width,
@@ -67,10 +71,10 @@ export async function createStartupSplashWindow(): Promise<void> {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    // 透明窗口：玻璃板是无色的真透明（用户 2026-11-19 要求），页面只画玻璃板和它的阴影。
-    // 已知代价（2026-07 逐帧截屏实证）：macOS 透明窗口的出帧耦合主进程主线程，启动期的实心
-    // 同步块会让画面停住，停完按时间跳到当前帧。所以加载阶段只放随机闪烁（停顿看不出来），
-    // 字标的构成留到就绪信号之后；首帧握手的保护（ready-to-show + 帧跑道回执）照旧。
+    // 透明窗口：玻璃板是无色的真透明（用户 2026-11-19 要求）。macOS 26+ 由原生层画系统液态玻璃和
+    // 玻璃下的水波（plan §6，动画在渲染服务器里跑，不受主线程影响）；否则页面自己画玻璃板。
+    // 已知代价（2026-07 逐帧截屏实证）：macOS 透明窗口里页面的出帧耦合主进程主线程，启动期的实心
+    // 同步块会让页面停住，所以字标的构成留到就绪信号之后；首帧握手的保护（ready-to-show + 帧跑道回执）照旧。
     transparent: true,
     roundedCorners: false,
     hasShadow: false,
@@ -90,12 +94,33 @@ export async function createStartupSplashWindow(): Promise<void> {
       startupSplashWindow = null
     }
   })
+  // Before the page loads, so the window never shows without its glass. A failed attach leaves the drawn glass.
+  startupGlass = null
+  const glass = loadStartupGlass()
+  if (glass) {
+    try {
+      const slab = STARTUP_SPLASH_SLAB
+      const still = systemPreferences.getAnimationSettings().prefersReducedMotion
+      const added = glass.attach(splashWindow.getNativeWindowHandle(), slab.x, slab.y, slab.width, slab.height, slab.radius,
+        still ? 0 : STARTUP_GLASS_RIPPLE, STARTUP_GLASS_RIM)
+      if (added.includes('glass')) startupGlass = glass
+      else { glass.clear(); console.warn('[startup-splash] native glass not attached:', added) }
+    } catch (error) {
+      console.warn('[startup-splash] native glass failed:', error instanceof Error ? error.message : String(error))
+      glass.clear() // nothing half attached under the drawn glass
+    }
+  }
+  const nativeGlass = startupGlass
+  splashWindow.once('close', () => {
+    nativeGlass?.clear()
+    if (startupGlass === nativeGlass) startupGlass = null
+  })
   splashWindow.once('ready-to-show', () => {
     showStartupSplashWindow(splashWindow)
   })
 
   try {
-    await splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderStartupSplashMarkup(theme))}`)
+    await splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderStartupSplashMarkup(theme, { glass: nativeGlass ? 'native' : 'drawn' }))}`)
     // 不在首帧就绪前强制 show：透明窗口在首帧 commit 前 show 出来是全透明的；
     // 若随后主线程立刻被重模块求值长时间阻塞（boot-entry 的动态 import），
     // 首帧握手会被永久卡死——真机复现过"窗口 isVisible 但屏幕全程无像素"。
@@ -140,8 +165,8 @@ export async function createStartupSplashWindow(): Promise<void> {
 }
 
 /**
- * 收口启动动画：保证最短可见时长后向 splash 页面发 finish 信号，
- * 由页面播完退场动画自行 window.close()；超时兜底强制 close。
+ * 收口启动动画：保证最短可见时长后，先让原生层的水面从左到右平静（有原生玻璃时，plan §6 W4），
+ * 再向 splash 页面发 finish 信号，由页面播完退场动画自行 window.close()；超时兜底强制 close。
  * splash 真正关闭后才执行 showMainWindow，避免主窗口和动画叠帧。
  */
 export function finishStartupSplashThen(showMainWindow: () => void): void {
@@ -159,7 +184,15 @@ export function finishStartupSplashThen(showMainWindow: () => void): void {
   })
 
   const shownAtMs = startupSplashShownAtMs ?? Date.now()
-  const finishDelayMs = Math.max(0, STARTUP_SPLASH_MIN_VISIBLE_MS - (Date.now() - shownAtMs))
+  const calmAtMs = Math.max(0, STARTUP_SPLASH_MIN_VISIBLE_MS - (Date.now() - shownAtMs))
+  const glass = startupGlass
+  const finishDelayMs = calmAtMs + (glass ? STARTUP_GLASS_CALM_MS + 50 : 0)
+
+  if (glass) {
+    setTimeout(() => {
+      if (!splashWindow.isDestroyed()) glass.calm(STARTUP_GLASS_CALM_MS / 1000)
+    }, calmAtMs)
+  }
 
   setTimeout(() => {
     if (splashWindow.isDestroyed()) return

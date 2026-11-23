@@ -2,15 +2,17 @@ import { STARTUP_SPLASH_WORDMARK, type StartupSplashGlyph } from './startup-spla
 
 /**
  * The startup splash (plan docs/superpowers/plans/2026-11-19-ready-next-startup-splash-implementation.md): a slab of
- * clear, colourless liquid glass over the desktop. While Ready loads, tiny orange-red specks twinkle at random in it.
- * When Ready is about to open, orange-red dots appear beside each of the five letters, attach to the letter's corners,
- * a hairline draws each outline between them, the letters fill and the dots dissolve (the DevDay "dot → line → plane").
+ * clear, colourless liquid glass over the desktop. While Ready loads the page shows nothing more (on macOS 26+ the
+ * native layer under it moves water through the glass, §6). When Ready is about to open, orange-red dots appear beside
+ * each of the five letters, attach to the letter's corners, a hairline draws each outline between them, the white,
+ * glowing letters fill and the dots dissolve (the DevDay "dot → line → plane").
  *
  * Motion contract: the page moves only opacity and transform, through CSS keyframes and transitions (no per-frame
  * script; the one script runs once, at the finish signal). Every motion is a function of time, so a stalled frame only
- * skips ahead; the loading twinkle is random by design, so a skip there cannot be seen.
+ * skips ahead.
  *
- * The window is transparent: the page draws the slab inside a margin that holds its shadow, and nothing else.
+ * The window is transparent. With `glass: 'drawn'` the page draws the slab inside a margin that holds its shadow; with
+ * `glass: 'native'` the system's glass is under the page and the page draws only the wordmark.
  * Pure: no Electron, no DOM. Main turns the markup into the splash window's data URL; the renderer's #/startup-preview
  * shows the same markup in a frame.
  */
@@ -22,15 +24,12 @@ const MARGIN = 32 // room for the slab's shadow inside the transparent window: n
 export const STARTUP_SPLASH_SIZE = { width: SLAB.width + 2 * MARGIN, height: SLAB.height + 2 * MARGIN } as const
 export const STARTUP_SPLASH_FINISH_EVENT = 'ready-startup-finish'
 
-const FONT_SIZE = 104
-const DOT_RADIUS = 3.3
-const SPECK_COUNT = 56
-const SPECK_INSET = 26
+// 80% of the first size (104), as the user set it in the demo window (2026-11-23); the dots shrink with it.
+const FONT_SIZE = 83.2
+const DOT_RADIUS = 2.64
 
-// Timing (ms). The loading twinkle: from the page's first style; the build: from the finish signal.
-const TWINKLE_AT = 260
+// Timing (ms). The drawn glass's sweep: from the page's first style; the build: from the finish signal.
 const GLINT_IN_AT = 220
-const SPECKS_OUT_MS = 320
 const GLYPH_STEP = 55
 const POP_MS = 300
 const ATTACH_AT = 220
@@ -58,28 +57,14 @@ export const STARTUP_SPLASH_FINISH = {
   fadeMs: FADE_MS,
 } as const
 
-// The glass has no colour of its own in either appearance; only the ink of the wordmark (and the halo that keeps it
-// legible over any wallpaper) follows the system's light or dark.
-interface Palette {
-  accent: string
-  ink: string
-  line: string
-  halo: string
-}
-
-const PALETTES: Record<StartupSplashTheme, Palette> = {
-  light: {
-    accent: '#ff5a1f',
-    ink: '#0b0b0e',
-    line: 'rgba(11, 11, 14, .8)',
-    halo: 'drop-shadow(0 0 .6px rgba(255, 255, 255, .9)) drop-shadow(0 0 7px rgba(255, 255, 255, .55))',
-  },
-  dark: {
-    accent: '#ff6a2c',
-    ink: '#f4f4f6',
-    line: 'rgba(244, 244, 246, .92)',
-    halo: 'drop-shadow(0 0 1px rgba(0, 0, 0, .5)) drop-shadow(0 0 8px rgba(0, 0, 0, .38))',
-  },
+// The glass has no colour of its own and the wordmark is white and glowing in either appearance (the user's choice,
+// 2026-11-23); only the orange-red of the dots follows the system's light or dark.
+const ACCENT: Record<StartupSplashTheme, string> = { light: '#ff5a1f', dark: '#ff6a2c' }
+const INK = {
+  fill: '#ffffff',
+  line: 'rgba(255, 255, 255, .95)',
+  glow: 'drop-shadow(0 0 2.4px rgba(255, 255, 255, .9)) drop-shadow(0 0 9.6px rgba(255, 255, 255, .55))',
+  lineGlow: 'drop-shadow(0 0 1.6px rgba(255, 255, 255, .8))',
 }
 
 const GLASS = {
@@ -123,36 +108,9 @@ export function startupSplashDots(): StartupSplashDot[] {
   return STARTUP_SPLASH_WORDMARK.glyphs.flatMap((glyph, index) => glyph.anchors.map(([ax, ay], k) => {
     const n = index * 31 + k
     const x = ORIGIN_X + (glyph.x + ax) * FONT_SIZE, y = BASELINE + ay * FONT_SIZE
-    const angle = hash(n * 2.3) * Math.PI * 2, distance = 11 + hash(n * 5.9) * 13
+    const angle = hash(n * 2.3) * Math.PI * 2, distance = 9 + hash(n * 5.9) * 10
     return { glyph: index, x, y, startX: x + Math.cos(angle) * distance, startY: y + Math.sin(angle) * distance }
   }))
-}
-
-/** A speck of the loading twinkle: where in the slab (slab coordinates), how big, how often it lights. */
-export interface StartupSplashSpeck {
-  x: number
-  y: number
-  radius: number
-  periodMs: number
-  phaseMs: number
-}
-
-export function startupSplashSpecks(): StartupSplashSpeck[] {
-  return Array.from({ length: SPECK_COUNT }, (_, n) => {
-    const periodMs = 1700 + hash(n * 4.7) * 1900
-    return {
-      x: SPECK_INSET + hash(n * 3.3 + 7) * (SLAB.width - 2 * SPECK_INSET),
-      y: SPECK_INSET + hash(n * 8.1 + 2) * (SLAB.height - 2 * SPECK_INSET),
-      radius: 1.1 + hash(n * 6.6) * 1,
-      periodMs,
-      phaseMs: hash(n * 1.7 + 3) * periodMs,
-    }
-  })
-}
-
-function speckMarkup(speck: StartupSplashSpeck): string {
-  const size = speck.radius * 2
-  return `<i style="left:${px(speck.x - speck.radius)}px;top:${px(speck.y - speck.radius)}px;width:${px(size)}px;height:${px(size)}px;animation-duration:${ms(speck.periodMs)};animation-delay:${ms(TWINKLE_AT + speck.phaseMs * 0.6)}"></i>`
 }
 
 function fillMarkup(glyph: StartupSplashGlyph, index: number): string {
@@ -197,7 +155,7 @@ function dotMarkup(dot: StartupSplashDot, n: number): string {
 }
 
 function styles(theme: StartupSplashTheme): string {
-  const p = PALETTES[theme]
+  const accent = ACCENT[theme]
   const radius = DOT_RADIUS * 2
   return `
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
@@ -207,19 +165,15 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
 .sheen { position: absolute; top: -40%; bottom: -40%; left: 0; width: 30%; background: linear-gradient(100deg, transparent, ${GLASS.sheen} 50%, transparent);
   transform: translateX(-120%) skewX(-14deg); animation: splash-sweep 1400ms cubic-bezier(.45, 0, .2, 1) ${ms(GLINT_IN_AT)} both; }
-.specks { position: absolute; inset: 0; transition: opacity ${ms(SPECKS_OUT_MS)} ease; }
-.specks i { position: absolute; border-radius: 50%; background: ${p.accent}; box-shadow: 0 0 6px ${p.accent}; opacity: 0;
-  animation: splash-twinkle ease-in-out infinite both; }
 .fill, .seg { position: absolute; display: block; overflow: visible; }
-.fill { fill: ${p.ink}; filter: ${p.halo}; opacity: 0; transition: opacity ${ms(FILL_MS)} cubic-bezier(.22, 1, .36, 1); }
-.seg { fill: none; stroke: ${p.line}; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 70ms linear; }
-.lines { position: absolute; inset: 0; filter: ${p.halo}; transition: opacity ${ms(LINE_FADE_MS)} ease; }
+.fill { fill: ${INK.fill}; filter: ${INK.glow}; opacity: 0; transition: opacity ${ms(FILL_MS)} cubic-bezier(.22, 1, .36, 1); }
+.seg { fill: none; stroke: ${INK.line}; stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 70ms linear; }
+.lines { position: absolute; inset: 0; filter: ${INK.lineGlow}; transition: opacity ${ms(LINE_FADE_MS)} ease; }
 .dot { position: absolute; width: ${radius}px; height: ${radius}px; transform: translate(var(--sx), var(--sy)); transition: transform ${ms(ATTACH_MS)} cubic-bezier(.3, .7, .2, 1); }
 .pop, .out, .dot i { position: absolute; inset: 0; }
 .pop { transform: scale(0); transition: transform ${ms(POP_MS)} cubic-bezier(.34, 1.56, .64, 1); }
 .out { transition: transform ${ms(DOT_OUT_MS)} cubic-bezier(.55, 0, .75, .2); }
-.dot i { border-radius: 50%; background: ${p.accent}; box-shadow: 0 0 8px ${p.accent}; }
-.finishing .specks { opacity: 0; }
+.dot i { border-radius: 50%; background: ${accent}; box-shadow: 0 0 6.4px ${accent}; }
 .finishing .dot { transform: none; }
 .finishing .pop { transform: none; }
 .finishing .out { transform: scale(0); }
@@ -228,9 +182,8 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 .finishing .sheen { animation: splash-glint ${ms(GLINT_MS)} cubic-bezier(.45, 0, .2, 1) ${ms(GLINT_AT)} both; }
 @keyframes splash-sweep { to { transform: translateX(420%) skewX(-14deg); } }
 @keyframes splash-glint { from { transform: translateX(-120%) skewX(-14deg); } to { transform: translateX(420%) skewX(-14deg); } }
-@keyframes splash-twinkle { 0%, 34%, 100% { opacity: 0; transform: scale(.4); } 12% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) {
-  .sheen, .specks, .lines, .dot { display: none; }
+  .sheen, .lines, .dot { display: none; }
   .fill { opacity: 1; transition: none; }
 }`
 }
@@ -249,8 +202,15 @@ function finishScript(): string {
 })();`
 }
 
-/** `scriptNonce`: for a host whose content security policy admits inline scripts only by nonce (the preview's frame). */
-export function renderStartupSplashMarkup(theme: StartupSplashTheme, { scriptNonce }: { scriptNonce?: string } = {}): string {
+/**
+ * `glass`: 'drawn' (the page draws the slab) or 'native' (the system's glass is under the page, which then draws only
+ * the wordmark). `scriptNonce`: for a host whose content security policy admits inline scripts only by nonce (the
+ * preview's frame).
+ */
+export function renderStartupSplashMarkup(
+  theme: StartupSplashTheme,
+  { glass = 'drawn', scriptNonce }: { glass?: 'drawn' | 'native'; scriptNonce?: string } = {},
+): string {
   const glyphs = STARTUP_SPLASH_WORDMARK.glyphs
   return `<!doctype html>
 <html lang="zh-CN" data-theme="${theme}">
@@ -260,8 +220,7 @@ export function renderStartupSplashMarkup(theme: StartupSplashTheme, { scriptNon
 <style>${styles(theme)}</style>
 </head>
 <body>
-<div class="glass"><div class="specks">${startupSplashSpecks().map(speckMarkup).join('')}</div><div class="sheen"></div></div>
-<div class="word" role="img" aria-label="Ready">${glyphs.map(fillMarkup).join('')}${glyphs.map(lineMarkup).join('')}${startupSplashDots().map(dotMarkup).join('')}</div>
+${glass === 'drawn' ? '<div class="glass"><div class="sheen"></div></div>\n' : ''}<div class="word" role="img" aria-label="Ready">${glyphs.map(fillMarkup).join('')}${glyphs.map(lineMarkup).join('')}${startupSplashDots().map(dotMarkup).join('')}</div>
 <script${scriptNonce ? ` nonce="${scriptNonce}"` : ''}>${finishScript()}</script>
 </body>
 </html>`

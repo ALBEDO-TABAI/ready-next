@@ -62,6 +62,7 @@ build/runtime-seeds/
 .impeccable/
 .lark-cli/
 /outputs/
+/native/startup-glass/build/
 index-*.css
 index-*.js
 index-*.html

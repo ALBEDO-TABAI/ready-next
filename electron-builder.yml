@@ -120,6 +120,10 @@ mac:
       arch:
         - arm64
   artifactName: "${productName}-${version}-${arch}.${ext}"
+  # The startup splash's native glass layer (npm run rebuild:native builds it; src/main/startup-glass.ts loads it).
+  extraResources:
+    - from: native/startup-glass/build/Release/ready_glass.node
+      to: native/ready_glass.node
   hardenedRuntime: false
   gatekeeperAssess: false
   identity: null

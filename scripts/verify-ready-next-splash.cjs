@@ -26,9 +26,9 @@ const { PNG } = require('pngjs')
 
 const { width: W, height: H } = splash.STARTUP_SPLASH_SIZE
 const WAIT_MS = 1500 // how long Ready "loads" in the frames below; the finish signal comes then
-// What shows through the clear glass: a flat light and a flat dark desktop for the measurements, a colourful one for
-// the frames a person looks at.
-const DESKTOP = { light: '#d5dbe4', dark: '#1e2734' }
+// What shows through the clear glass: a flat mid-grey and a flat dark desktop for the measurements (the wordmark is white
+// in both appearances, so it is measured where white stands out), a colourful one for the frames a person looks at.
+const DESKTOP = { light: '#6f7884', dark: '#1e2734' }
 const WALLPAPER = 'html { background: radial-gradient(70% 120% at 15% 10%, #f2b38a, transparent 60%), radial-gradient(60% 110% at 85% 90%, #6f8fd8, transparent 65%), linear-gradient(120deg, #2c3e66, #a35d6a 55%, #e7c27d) !important; }'
 const SETTLED_MS = splash.STARTUP_SPLASH_FINISH.settledMs
 const FONT = fs.readFileSync(path.join(REPO, 'src/renderer/design/next/fonts/InstrumentSerif.woff2')).toString('base64')
@@ -56,8 +56,8 @@ async function shot(page, name) {
 }
 
 // What a frame shows: orange dots (connected blobs of the accent colour, their spread across the slab) and the ink of
-// the wordmark inside its box (dark ink on light, light ink on dark).
-function read(png, theme) {
+// the wordmark inside its box (its white core; the glow around it is dimmer).
+function read(png) {
   const scale = png.width / W
   const accent = new Uint8Array(png.width * png.height), ink = new Uint8Array(png.width * png.height)
   const place = splash.STARTUP_SPLASH_WORDMARK_PLACE
@@ -67,7 +67,7 @@ function read(png, theme) {
     const i = (y * png.width + x) * 4, r = png.data[i], g = png.data[i + 1], b = png.data[i + 2]
     if (r > 120 && r - b > 70 && r - g > 45) { /* orange, also where a dot breathes dim */ accent[y * png.width + x] = 1; accentCount++; minX = Math.min(minX, x); maxX = Math.max(maxX, x) }
     const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1 && (theme === 'light' ? lum < 90 : lum > 205) && Math.abs(r - b) < 40) ink[y * png.width + x] = 1
+    if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1 && lum > 235 && Math.abs(r - b) < 40) ink[y * png.width + x] = 1
   }
   let blobs = 0, largest = 0, outside = 0
   const near = { x0: (place.x - 34) * scale, x1: (place.x + 2.05 * place.fontSize + 34) * scale, y0: (place.baseline - 0.8 * place.fontSize - 34) * scale, y1: (place.baseline + 0.25 * place.fontSize + 34) * scale }
@@ -100,7 +100,10 @@ function overlap(a, b) {
 const ENTRY = `const { app } = require('electron')
 app.setPath('userData', ${JSON.stringify(path.join(temporary, 'profile'))})
 app.on('window-all-closed', () => {})
+globalThis.__loadNative = file => { const loaded = { exports: {} }; process.dlopen(loaded, file); return loaded.exports }
 `
+// The splash's native glass layer as Main loads it in development (src/main/startup-glass.ts), built by rebuild:native.
+const NATIVE_GLASS = path.join(REPO, 'native', 'startup-glass', 'build', 'Release', 'ready_glass.node')
 
 async function main() {
   const entry = path.join(temporary, 'entry.cjs')
@@ -137,32 +140,30 @@ async function main() {
         context.letterSpacing = `${-0.01 * place.fontSize}px`
         context.fillStyle = ink
         context.fillText('Ready', place.x, place.baseline)
-      }, { font: FONT, place: splash.STARTUP_SPLASH_WORDMARK_PLACE, ink: theme === 'light' ? '#0b0b0e' : '#f4f4f6', W, H })
-      const referenceInk = read(await shot(reference, `${theme}-reference`), theme).ink
+      }, { font: FONT, place: splash.STARTUP_SPLASH_WORDMARK_PLACE, ink: '#ffffff', W, H })
+      const referenceInk = read(await shot(reference, `${theme}-reference`)).ink
       await reference.close()
 
       // 1. Before anything moves: the glass alone.
       await seek(page, 0)
-      let frame = read(await shot(page, `${theme}-00-glass`), theme)
+      let frame = read(await shot(page, `${theme}-00-glass`))
       assert.equal(frame.accentCount, 0, 'no dot before the intro')
       assert.ok(overlap(frame.ink, referenceInk) < 0.05, 'no wordmark before the intro')
       pass(`${theme}: the first frame is the clear glass alone`)
 
-      // 2. While Ready loads: only tiny specks twinkle here and there; no letter dots, no wordmark.
-      const counts = []
+      // 2. While Ready loads the page stays as it is: no dot, no wordmark (on macOS 26+ the water moves in the native
+      // layer under the page, plan §6).
       for (const at of [900, 1200, WAIT_MS]) {
         await seek(page, at)
-        const loading = read(await shot(page, `${theme}-01-loading-${at}`), theme)
-        assert.ok(loading.largest < 30, `only tiny specks while loading (largest ${loading.largest.toFixed(0)} px)`)
+        const loading = read(await shot(page, `${theme}-01-loading-${at}`))
+        assert.equal(loading.accentCount, 0, `no dot while loading: ${loading.accentCount} accent pixels`)
         assert.ok(overlap(loading.ink, referenceInk) < 0.05, 'the wordmark is not revealed while loading')
-        counts.push(loading.blobs)
       }
-      assert.ok(Math.min(...counts) >= 3, `specks twinkle while loading: ${counts.join(', ')}`)
-      pass(`${theme}: while loading, tiny specks twinkle at random`, `lit: ${counts.join(', ')}`)
+      pass(`${theme}: while loading, the page shows no dot and no wordmark`)
 
       // 3. At the finish signal: dots appear beside the five letters (nowhere else), before any letter shows.
       await seek(page, WAIT_MS + 300, WAIT_MS)
-      const appearing = read(await shot(page, `${theme}-02-dots-appear`), theme)
+      const appearing = read(await shot(page, `${theme}-02-dots-appear`))
       assert.ok(appearing.blobs >= 20, `dots beside the letters: ${appearing.blobs}`)
       assert.ok(appearing.outside === 0, `every dot is beside the wordmark (${appearing.outside} px outside)`)
       assert.ok(overlap(appearing.ink, referenceInk) < 0.2, 'the letters are not there yet')
@@ -171,7 +172,7 @@ async function main() {
 
       // 4. Settled: the wordmark alone, in Instrument Serif, where text in that font would stand; every dot gone.
       await seek(page, WAIT_MS + SETTLED_MS + 40, WAIT_MS)
-      const settled = read(await shot(page, `${theme}-04-settled`), theme)
+      const settled = read(await shot(page, `${theme}-04-settled`))
       const match = overlap(settled.ink, referenceInk)
       assert.equal(settled.accentCount, 0, `no dot left once settled: ${settled.accentCount} accent pixels`)
       assert.ok(match >= 0.85, `the wordmark matches "Ready" in Instrument Serif: ${match.toFixed(3)}`)
@@ -201,7 +202,7 @@ async function main() {
       await page.waitForTimeout(WAIT_MS)
       await page.evaluate(event => window.dispatchEvent(new Event(event)), splash.STARTUP_SPLASH_FINISH_EVENT)
       await page.waitForTimeout(SETTLED_MS + 250)
-      const live = read(await shot(page, `${theme}-05-real-time`), theme)
+      const live = read(await shot(page, `${theme}-05-real-time`))
       assert.equal(live.accentCount, 0, `no dot left in real time: ${live.accentCount}`)
       assert.ok(overlap(live.ink, referenceInk) >= 0.85, 'the wordmark stands in real time')
       pass(`${theme}: in real time the same ending is reached`)
@@ -209,7 +210,7 @@ async function main() {
       // 7. Reduce motion: the wordmark from the first frame, no dots.
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await seek(page, 0)
-      const still = read(await shot(page, `${theme}-06-reduced-motion`), theme)
+      const still = read(await shot(page, `${theme}-06-reduced-motion`))
       assert.equal(still.accentCount, 0)
       assert.ok(overlap(still.ink, referenceInk) >= 0.85, 'with reduced motion the wordmark shows at once')
       await page.emulateMedia({ reducedMotion: 'no-preference' })
@@ -228,7 +229,15 @@ async function main() {
       const meanAlpha = alphaSum / alphaCount / 255
       assert.ok(meanAlpha < 0.2, `the glass lets the desktop through: mean opacity ${meanAlpha.toFixed(2)}`)
       await clear.close()
-      pass(`${theme}: see-through around the slab, and the glass is clear`, `glass opacity ${(meanAlpha * 100).toFixed(0)}%`)
+      // Over the system's glass (macOS 26+) the page paints nothing where the slab is, until the wordmark comes.
+      const bare = await open(`data:text/html;charset=utf-8,${encodeURIComponent(splash.renderStartupSplashMarkup(theme, { glass: 'native' }))}`, null, true)
+      await seek(bare, WAIT_MS)
+      const barePng = PNG.sync.read(await bare.screenshot({ omitBackground: true }))
+      let painted = 0
+      for (let i = 3; i < barePng.data.length; i += 4) if (barePng.data[i]) painted++
+      assert.equal(painted, 0, `over the native glass nothing is painted while loading: ${painted} pixels`)
+      await bare.close()
+      pass(`${theme}: see-through around the slab, and the glass is clear; over the native glass the page is empty`, `glass opacity ${(meanAlpha * 100).toFixed(0)}%`)
 
       // Frames for a person to judge, every 150 ms through the whole run, over the colourful wallpaper.
       await page.addInitScript(css => document.addEventListener('DOMContentLoaded', () => { const style = document.createElement('style'); style.textContent = css; document.head.append(style) }), WALLPAPER)
@@ -238,6 +247,24 @@ async function main() {
       }
       await page.close()
     }
+
+    // 9. On macOS 26+, the native glass layer loads in Electron and attaches the glass and the water under a hidden
+    // transparent window of the splash's size, calms and clears (how it looks on a real desktop needs a person).
+    const major = Number((await app.evaluate(() => process.getSystemVersion())).split('.')[0])
+    if (process.platform === 'darwin' && major >= 26 && fs.existsSync(NATIVE_GLASS)) {
+      const added = await app.evaluate(async ({ BrowserWindow }, { file, slab, width, height }) => {
+        const glass = globalThis.__loadNative(file)
+        const win = new BrowserWindow({ width, height, show: false, frame: false, transparent: true, backgroundColor: '#00000000' })
+        const result = glass.attach(win.getNativeWindowHandle(), slab.x, slab.y, slab.width, slab.height, slab.radius, 18, 200)
+        glass.calm(0.2)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        const cleared = glass.clear()
+        win.destroy()
+        return `${result} / ${cleared}`
+      }, { file: NATIVE_GLASS, slab: splash.STARTUP_SPLASH_SLAB, width: W, height: H })
+      assert.equal(added, 'glass ripples / clear')
+      pass('native glass: loads in Electron, attaches the glass and the water, calms and clears', added)
+    } else console.log(`SKIP native glass: needs macOS 26+ and ${path.relative(REPO, NATIVE_GLASS)} (npm run rebuild:native)`)
   } finally {
     await app.close().catch(() => {})
   }

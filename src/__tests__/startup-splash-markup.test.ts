@@ -4,7 +4,6 @@ import { STARTUP_SPLASH_WORDMARK } from '../shared/startup-splash-glyphs'
 import {
   renderStartupSplashMarkup,
   startupSplashDots,
-  startupSplashSpecks,
   STARTUP_SPLASH_FINISH,
   STARTUP_SPLASH_SIZE,
   STARTUP_SPLASH_SLAB,
@@ -27,19 +26,21 @@ test('each corner of the five letters gets one dot, which appears just beside it
     assert.equal(dot.glyph, anchors[i].glyph)
     assert.ok(Math.abs(dot.x - anchors[i].x) < 1e-9 && Math.abs(dot.y - anchors[i].y) < 1e-9, `dot ${i} lands on its corner`)
     const away = Math.hypot(dot.startX - dot.x, dot.startY - dot.y)
-    assert.ok(away >= 10 && away <= 25, `dot ${i} appears ${away.toFixed(1)}px from its corner`)
+    assert.ok(away >= 8 && away <= 20, `dot ${i} appears ${away.toFixed(1)}px from its corner`)
   })
 })
 
-test('the loading specks lie inside the slab and twinkle out of step', () => {
-  const specks = startupSplashSpecks()
-  assert.ok(specks.length >= 40)
-  for (const speck of specks) {
-    assert.ok(speck.x - speck.radius > 0 && speck.x + speck.radius < STARTUP_SPLASH_SLAB.width)
-    assert.ok(speck.y - speck.radius > 0 && speck.y + speck.radius < STARTUP_SPLASH_SLAB.height)
-    assert.ok(speck.radius <= 2.2, 'tiny, not the letter dots')
+test('over the native glass the page draws no slab of its own, only the same wordmark and dots', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    const drawn = renderStartupSplashMarkup(theme), native = renderStartupSplashMarkup(theme, { glass: 'native' })
+    assert.match(drawn, /<div class="glass">/)
+    assert.doesNotMatch(native, /class="glass"|class="sheen"/)
+    const wordOf = (markup: string) => markup.slice(markup.indexOf('<div class="word"'), markup.indexOf('<script'))
+    assert.equal(wordOf(native), wordOf(drawn))
+    assert.equal(native.match(/class="dot"/g)?.length, startupSplashDots().length)
   }
-  assert.ok(new Set(specks.map(speck => Math.round(speck.periodMs / 50))).size > specks.length / 2, 'periods differ')
+  // nothing twinkles while loading: the page has no loading motion besides the drawn glass's one sweep
+  assert.doesNotMatch(renderStartupSplashMarkup('light'), /speck|twinkle/)
 })
 
 test('the wordmark stands centred on the slab, set as the shell sets it', () => {
@@ -59,7 +60,7 @@ test('only opacity and transform are animated, and no script runs per frame', ()
     const markup = renderStartupSplashMarkup(theme)
     const style = markup.slice(markup.indexOf('<style>'), markup.indexOf('</style>'))
     const keyframes = [...style.matchAll(/@keyframes [\w-]+ \{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g)]
-    assert.ok(keyframes.length >= 3)
+    assert.ok(keyframes.length >= 2)
     for (const [, body] of keyframes) {
       for (const [, property] of body.matchAll(/([a-z-]+):/g)) assert.ok(['opacity', 'transform'].includes(property), `keyframes animate ${property}`)
     }
@@ -80,9 +81,12 @@ test('the page is see-through around the slab, and the glass has no colour of it
     const glass = markup.match(/\.glass \{[^}]*\}/)?.[0] ?? ''
     for (const [, r, g, b] of glass.matchAll(/rgba\((\d+), (\d+), (\d+),/g)) assert.ok(r === g && g === b, `glass colour rgba(${r}, ${g}, ${b})`)
   }
-  // the glass is the same in both appearances; only the ink of the wordmark follows the system
+  // the glass and the white, glowing wordmark are the same in both appearances; only the dots' orange follows the system
   const glassOf = (theme: 'light' | 'dark') => renderStartupSplashMarkup(theme).match(/\.glass \{[^}]*\}/)?.[0]
   assert.equal(glassOf('light'), glassOf('dark'))
+  const fillOf = (theme: 'light' | 'dark') => renderStartupSplashMarkup(theme).match(/\.fill \{[^}]*\}/)?.[0] ?? ''
+  assert.equal(fillOf('light'), fillOf('dark'))
+  assert.match(fillOf('light'), /fill: #ffffff; filter: drop-shadow\(0 0 [\d.]+px rgba\(255, 255, 255,/)
   assert.ok(STARTUP_SPLASH_FINISH.fadeDelayMs > STARTUP_SPLASH_FINISH.settledMs)
 })
 
