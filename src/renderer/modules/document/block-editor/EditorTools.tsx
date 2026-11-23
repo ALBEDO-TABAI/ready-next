@@ -257,7 +257,8 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
   // A query that matches nothing and ends with a space means the writer moved on.
   const slashStale = picker?.kind === 'slash' && !slashItems.length && /\s$/.test(query)
   useEffect(() => { if (slashStale) setPicker(null) }, [slashStale])
-  return <div ref={root} onMouseUp={select} onKeyUp={select}
+  // .ready-block-flow: the page's top-level blocks are this wrapper's children; the page's block spacing is keyed to it.
+  return <div ref={root} className="ready-block-flow" onMouseUp={select} onKeyUp={select}
     onInput={event => { if (!('isComposing' in event.nativeEvent && event.nativeEvent.isComposing)) detectPicker(event.target) }}
     onCompositionEnd={event => detectPicker(event.target)}
     onKeyDownCapture={event => {

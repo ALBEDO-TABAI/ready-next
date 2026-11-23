@@ -202,11 +202,13 @@
   .ink-scope .ink-page .ink-cover-actions { right: 32px; }
 }
 .ink-scope .ink-page .note-preview-shell { font-family: var(--rn-font-ui); color: var(--rn-ink); }
-.ink-scope .ink-page .note-preview-body { gap: 0; font-size: var(--rn-prose-size); line-height: 1.65; }
-.ink-scope .ink-page.is-small .note-preview-body { font-size: 14px; line-height: 1.5; }
+.ink-scope .ink-page .note-preview-body { gap: 0; font-size: var(--rn-prose-size); line-height: var(--rn-prose-lh); }
+.ink-scope .ink-page.is-small .note-preview-body { font-size: 14px; line-height: 1.6; }
 .ink-scope .ink-page.font-serif .note-preview-body { font-family: var(--ink-font-serif); }
 .ink-scope .ink-page.font-mono .note-preview-body { font-family: var(--rn-font-mono); }
-.ink-scope .ink-page .note-preview-body > .ready-block-shell { padding-top: 6px; padding-bottom: 6px; }
+/* Top-level blocks: in the editor they sit in .ready-block-flow (EditorTools), elsewhere straight in the body. Between two
+   paragraphs: 4 + 4 here and the paragraph's own 2 + 2, so the gap between paragraphs is about twice the gap between lines. */
+.ink-scope .ink-page :is(.note-preview-body, .ready-block-flow) > .ready-block-shell { padding-top: 4px; padding-bottom: 4px; }
 .ink-scope .ink-page .ready-block-shell :is(.note-preview-markdown-p, .note-preview-markdown-h1, .note-preview-markdown-h2, .note-preview-markdown-h3, .note-preview-markdown-h4) { margin: 0; padding: 2px; }
 .ink-scope .ink-page .note-preview-markdown-p { font-size: inherit; line-height: inherit; color: var(--rn-ink); text-wrap: wrap; }
 .ink-scope .ink-page :is(.note-preview-markdown-h1, .note-preview-markdown-h2, .note-preview-markdown-h3, .note-preview-markdown-h4) {
@@ -226,7 +228,7 @@
 .ink-scope .ink-page .ready-block-marker.is-bullet { font-size: 1.5em; line-height: 1.1; font-family: Arial, sans-serif; }
 .ink-scope .ink-page .ready-block-container[data-checked='true'] > .ready-block-shell .note-preview-markdown-p { color: var(--rn-ink-3); text-decoration-color: var(--rn-ink-4); }
 .ink-scope .ink-page .ready-block-container.is-quote { border-left: 3px solid currentColor; padding-left: 14px; }
-.ink-scope .ink-page .note-preview-body > .ready-block-shell:is([data-block-type='blockquote'], [data-block-type='callout'], [data-block-type='code'], [data-block-type='table'], [data-block-type='widget']) { padding-top: 8px; padding-bottom: 8px; }
+.ink-scope .ink-page :is(.note-preview-body, .ready-block-flow) > .ready-block-shell:is([data-block-type='blockquote'], [data-block-type='callout'], [data-block-type='code'], [data-block-type='table'], [data-block-type='widget']) { padding-top: 8px; padding-bottom: 8px; }
 .ink-scope .ink-page .ready-callout { border-radius: var(--rn-r-md); }
 .ink-scope .ink-page .note-preview-markdown-pre { margin: 0; padding: 32px 20px; border-radius: var(--rn-r-md); background: var(--rn-fill-2); font-family: var(--rn-font-mono); font-size: 13.6px; line-height: 20.4px; tab-size: 2; }
 .ink-scope .ink-page :not(pre) > .note-preview-markdown-code { font-family: var(--rn-font-mono); font-size: 85%; line-height: normal; color: var(--rn-ink); background: var(--rn-fill-2); padding: .2em .4em; border-radius: 4px; }
