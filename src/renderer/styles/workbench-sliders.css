@@ -37,9 +37,16 @@
   box-shadow: none;
   cursor: pointer;
   transition:
-    background-color var(--rn-d-2) var(--rn-ease-out),
-    color var(--rn-d-2) var(--rn-ease-out),
-    transform var(--rn-d-2) var(--rn-ease-out);
+    background-color var(--rn-d-1) var(--rn-ease-std),
+    color var(--rn-d-1) var(--rn-ease-std),
+    transform var(--rn-d-release) var(--rn-ease-spring);
+}
+
+/* The one press (V9, motion language M2): down to .94 quickly, back on the release spring. */
+.icon-rail-slider__button:active {
+  transform: scale(.94);
+  transition-duration: var(--rn-d-1);
+  transition-timing-function: var(--rn-ease-out);
 }
 
 .icon-rail-slider__button:hover {
@@ -71,10 +78,10 @@
   width: 15px;
   height: 15px;
   transition:
-    opacity 160ms ease,
+    opacity var(--rn-d-1) var(--rn-ease-std),
     transform var(--rn-d-2) var(--rn-ease-out),
-    stroke-width 180ms ease,
-    filter 180ms ease;
+    stroke-width var(--rn-d-1) var(--rn-ease-std),
+    filter var(--rn-d-1) var(--rn-ease-std);
 }
 
 .icon-rail-slider__glyph.is-filled {
@@ -106,5 +113,10 @@
 @media (prefers-reduced-motion: reduce) {
   .icon-rail-slider__glyph {
     transition: none;
+  }
+
+  .icon-rail-slider__button:active,
+  .shell-rail__button:active {
+    transform: none;
   }
 }

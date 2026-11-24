@@ -16,15 +16,16 @@ test('workbench side/chat shells interpolate width via CSS transition', () => {
 
   // CSS: transition rule present for both shell data attributes.
   const transitionBlockMatch = indexCss.match(
-    /\[data-liquid-shell='side-panel'\][\s\S]{0,120}\[data-liquid-shell='chat-panel'\]\s*\{[\s\S]*?transition:[\s\S]*?width\s+180ms[\s\S]*?min-width\s+180ms[\s\S]*?\}/,
+    /\[data-liquid-shell='side-panel'\][\s\S]{0,120}\[data-liquid-shell='chat-panel'\]\s*\{[\s\S]*?transition:[\s\S]*?width\s+var\(--rn-d-2\)[\s\S]*?min-width\s+var\(--rn-d-2\)[\s\S]*?\}/,
   )
-  assert.ok(transitionBlockMatch, 'CSS transition rule for side/chat shells must declare width + min-width 180ms')
+  // Motion language (2026-11-24): the panel time is the --rn-d-2 token (200ms), the same as panel-motion.ts.
+  assert.ok(transitionBlockMatch, 'CSS transition rule for side/chat shells must declare width + min-width over --rn-d-2')
 
   // CSS: resizing override + reduced motion override.
   assert.match(indexCss, /body\.resizing \[data-liquid-shell='side-panel'\][\s\S]*?transition:\s*none/)
   assert.match(
     indexCss,
-    /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\[data-liquid-shell='side-panel'\][\s\S]*?transition-duration:\s*80ms/,
+    /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\[data-liquid-shell='side-panel'\][\s\S]*?transition-duration:\s*0s/,
   )
 
   // The responsive shell supplies widths without deferred shell timers (behavior: shell-presentation.test.tsx).

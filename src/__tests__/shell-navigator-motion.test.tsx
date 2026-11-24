@@ -69,6 +69,28 @@ test('navigators change vertically in the rail\'s direction and the old one is h
   await act(async () => { await wait(WORKBENCH_MODE_SCENE_TRANSITION_MS + 80) })
   assert.deepEqual(shown(), ['browser'])
 
+  // A second change while the first is still moving: every navigator still leaving keeps leaving, inert, until its own
+  // fade is over; none vanishes early and none is left on screen.
+  await render('document')
+  await act(async () => { await wait(60) })
+  await render('calendar')
+  assert.equal(section('browser').dataset.navMotion, 'leave', 'the first one is still leaving')
+  assert.equal(section('document').dataset.navMotion, 'leave', 'the one that just arrived turns and leaves')
+  assert.equal(section('calendar').dataset.navMotion, 'enter')
+  assert.deepEqual(shown(), ['browser', 'document', 'calendar'])
+  await act(async () => { await wait(WORKBENCH_MODE_SCENE_TRANSITION_MS + 80) })
+  assert.deepEqual(shown(), ['calendar'])
+  assert.equal(dom.window.document.querySelector('[data-nav-motion]'), null)
+
+  // Called back while it leaves: the navigator turns around (it is shown again at once, never hidden in between).
+  await render('rss')
+  await render('calendar')
+  assert.equal(section('calendar').hidden, false)
+  assert.equal(section('calendar').hasAttribute('inert'), false)
+  assert.equal(section('rss').dataset.navMotion, 'leave')
+  await act(async () => { await wait(WORKBENCH_MODE_SCENE_TRANSITION_MS + 80) })
+  assert.deepEqual(shown(), ['calendar'])
+
   // An immediate change (or a collapsed sidebar) swaps at once.
   await render('rss', false)
   assert.deepEqual(shown(), ['rss'])
@@ -76,4 +98,27 @@ test('navigators change vertically in the rail\'s direction and the old one is h
 
   // The navigators stay mounted throughout, so their state survives the switch.
   assert.equal(dom.window.document.querySelectorAll('[data-shell-navigator]').length, 4)
+})
+
+test('a scene change settles under StrictMode too (the expiry update stays pure)', async t => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true })
+  const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true }
+  const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
+  const root = createRoot(dom.window.document.getElementById('root')!)
+  t.after(async () => {
+    await act(async () => root.unmount()); dom.window.close()
+    for (const [key, descriptor] of Object.entries(previous)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+  })
+  let seen: ReturnType<typeof useNavigatorMotion> | null = null
+  function Probe({ mode }: { mode: WorkbenchMode }) { seen = useNavigatorMotion(mode, true); return null }
+  await act(async () => root.render(<React.StrictMode><Probe mode="document" /></React.StrictMode>))
+  await act(async () => root.render(<React.StrictMode><Probe mode="rss" /></React.StrictMode>))
+  assert.deepEqual(Object.keys(seen!.leaving), ['document'])
+  await act(async () => { await wait(WORKBENCH_MODE_SCENE_TRANSITION_MS + 80) })
+  assert.deepEqual(seen!.leaving, {}, 'nothing is left leaving')
+  assert.equal(seen!.entering, false)
 })

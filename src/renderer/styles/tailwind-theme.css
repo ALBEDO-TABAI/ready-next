@@ -5,6 +5,15 @@
   --font-head: var(--font-ui);
   --font-mono: var(--rn-font-mono);
   --font-numeric: var(--font-mono);
+  /* Motion (motion language M1): Tailwind's transition-* and ease-* utilities resolve to the --rn-* motion tokens. */
+  --default-transition-duration: var(--rn-d-1);
+  --default-transition-timing-function: var(--rn-ease-std);
+  --ease-std: var(--rn-ease-std);
+  --ease-out: var(--rn-ease-out);
+  --ease-in: var(--rn-ease-in);
+  --ease-in-out: var(--rn-ease-in-out);
+  --animate-spin: spin var(--rn-d-spin) linear infinite;
+  --animate-pulse: pulse var(--rn-d-loop) var(--rn-ease-in-out) infinite;
   --text-2xs: 9px;
   --text-xs: 10px;
   --text-sm: 11px;

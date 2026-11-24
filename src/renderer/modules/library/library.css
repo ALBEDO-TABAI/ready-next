@@ -52,6 +52,7 @@
     .rn-library .library-toolbar b { max-width: 32cqw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .rn-library .open-book, .rn-library .open-cover, .rn-library .bk-x, .rn-library .bk-y, .rn-library .bk-in, .rn-library .pane { animation: none; transition: none; }
+    .rn-library .open-book, .rn-library .open-cover, .rn-library .bk-x, .rn-library .bk-y, .rn-library .bk-in, .rn-library .pane, .rn-library .bookcase,
+    .rn-library .bk .spine, .rn-library .pane-label, .rn-library .bookend, .rn-library .reader > .rd-dock, .rn-library .rd-panel { animation: none; transition: none; }
   }
 }

@@ -9,7 +9,7 @@
  * It wears the drop target's look (the signal colour's soft fill and ring): "it landed here, just now".
  */
 .file-tree-item-flash-complete {
-  animation: file-tree-flash-glow 1500ms var(--rn-ease-out) 1;
+  animation: file-tree-flash-glow var(--rn-d-flash) var(--rn-ease-out) 1;
   z-index: 3;
 }
 @keyframes file-tree-flash-glow {

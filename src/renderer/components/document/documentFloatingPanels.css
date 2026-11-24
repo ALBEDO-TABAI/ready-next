@@ -357,23 +357,23 @@
 }
 
 @keyframes documentPanelInLeft {
-  from { opacity: 0; transform: translateX(-12px); }
+  from { opacity: 0; transform: translateX(calc(-1 * var(--rn-shift-2))); }
   to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes documentPanelInRight {
-  from { opacity: 0; transform: translateX(12px); }
+  from { opacity: 0; transform: translateX(var(--rn-shift-2)); }
   to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes documentPanelOutLeft {
   from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 0; transform: translateX(calc(-1 * var(--rn-shift-2))); }
 }
 
 @keyframes documentPanelOutRight {
   from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(12px); }
+  to { opacity: 0; transform: translateX(var(--rn-shift-2)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

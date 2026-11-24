@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { MenuAnchor } from './CommandMenu'
+import { useLeaveAsGhost } from '../../../components/ui/leave'
 import { SLASH_GROUPS, type SlashItem } from './slash-items'
 
 // The slash menu (W3 §4.3) in W1's menu language. It never takes focus: the query is what follows “/” in the
@@ -13,6 +14,8 @@ export function SlashMenu({ anchor, items, active, onActive, onChoose, onClose }
 }) {
   const id = useId()
   const panel = useRef<HTMLDivElement>(null)
+  // Opens downward from the caret and fades out in place when closed (motion language M2).
+  useLeaveAsGhost(panel)
   const closeRef = useRef(onClose); closeRef.current = onClose
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !panel.current?.contains(event.target)) closeRef.current() }
@@ -22,7 +25,7 @@ export function SlashMenu({ anchor, items, active, onActive, onChoose, onClose }
   useEffect(() => { panel.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [active, items.length])
   const groups = SLASH_GROUPS.map(group => ({ group, entries: items.map((item, index) => ({ item, index })).filter(entry => entry.item.group === group) }))
     .filter(entry => entry.entries.length)
-  return createPortal(<div ref={panel} className="rn-ui rn-float ready-slash-menu" data-block-popup data-ready-native-overlay=""
+  return createPortal(<div ref={panel} className="rn-ui rn-float ready-slash-menu" data-float-motion="down" data-block-popup data-ready-native-overlay=""
     style={{ left: Math.max(8, Math.min(anchor.left, window.innerWidth - 316)), top: Math.max(8, Math.min(anchor.bottom + 6, window.innerHeight - 380)) }}
     onMouseDown={event => event.preventDefault()}>
     <div role="listbox" id={id} aria-label="插入块" className="ready-slash-menu__list">

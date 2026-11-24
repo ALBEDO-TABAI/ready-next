@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DOCUMENT_PALETTE, isDocumentColor, type InlineMarks, type InlineReference } from '../../../../shared/document-blocks'
 import { parseReadyUri, toReadyUri } from '../../../../shared/ready-ref'
 import type { MenuAnchor } from './CommandMenu'
+import { useLeaveAsGhost } from '../../../components/ui/leave'
 import { Bold, Code, Italic, Link2, Strikethrough, Underline, type LucideIcon } from 'lucide-react'
 import { Input, Select } from '../../../components/ui/Field'
 
@@ -13,6 +14,8 @@ export function InlineToolbar({ anchor, marks, apply, close, open, report }: {
   anchor: MenuAnchor; marks: InlineMarks; apply(patch: InlineMarks): void; close(): void
   open(reference: InlineReference): Promise<void>; report(error: unknown): void
 }) {
+  const panel = useRef<HTMLDivElement>(null)
+  useLeaveAsGhost(panel)
   const [link, setLink] = useState<string | null>(null)
   const initial = marks.reference?.kind === 'wiki' ? `[[${marks.reference.target}]]` : marks.reference?.kind === 'ready' ? toReadyUri(marks.reference.ref) : marks.reference?.href ?? ''
   const saveLink = () => {
@@ -27,7 +30,7 @@ export function InlineToolbar({ anchor, marks, apply, close, open, report }: {
     } catch (error) { console.warn('[InlineToolbar] apply link failed:', error instanceof Error ? error.message : String(error)); report(error) }
   }
   // W1 primitives (W3 §4.3): icon buttons named by their label, W1 selects and field, the float surface.
-  return createPortal(<div role="toolbar" aria-label="文字格式" data-block-popup data-ready-native-overlay="" className="rn-ui rn-float ready-block-popover ready-block-toolbar"
+  return createPortal(<div ref={panel} role="toolbar" aria-label="文字格式" data-float-motion="down" data-block-popup data-ready-native-overlay="" className="rn-ui rn-float ready-block-popover ready-block-toolbar"
     style={{ left: Math.max(8, Math.min(anchor.left, window.innerWidth - 380)), top: Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - 160)) }}
     onMouseDown={event => { if (event.target instanceof HTMLElement && event.target.tagName === 'BUTTON') event.preventDefault() }}
     onKeyDown={event => {

@@ -28,7 +28,8 @@ test('chat panel collapse uses the new single-layer motion handoff instead of th
   assert.match(motionLayer, /onAnimationComplete=\{\(\) => setIsAnimating\(false\)\}/)
   assert.match(motionLayer, /initial=\{reduceMotion \? false : \{ x: WORKBENCH_PANEL_MOTION_OFFSET_PX, opacity: 0\.01 \}\}/)
   assert.match(motionLayer, /animate=\{\{\s*x: 0,\s*opacity: 1,/)
-  assert.match(motionLayer, /exit=\{\s*reduceMotion[\s\S]*x: WORKBENCH_PANEL_MOTION_OFFSET_PX,\s*opacity: 0\.01,/)
+  // Motion language (2026-11-24): leaving is quicker than arriving and does not travel.
+  assert.match(motionLayer, /exit=\{\s*reduceMotion[\s\S]*opacity: 0\.01,\s*transition: \{ duration: MOTION_MS\.d1 \/ 1000, ease: EASE\.std \}/)
   assert.match(motionLayer, /className="relative overflow-visible"/)
   assert.match(motionLayer, /zIndex:\s*4/)
   assert.match(motionLayer, /className="relative min-h-0 overflow-hidden flex flex-col"/)
@@ -47,5 +48,7 @@ test('chat panel collapse uses the new single-layer motion handoff instead of th
   assert.doesNotMatch(motionLayer, /clipPath:/)
   assert.doesNotMatch(motionLayer, /backfaceVisibility:\s*'hidden'/)
   assert.doesNotMatch(motionLayer, /translateZ\(0\)/)
-  assert.match(panelMotion, /export const WORKBENCH_PANEL_REDUCED_MOTION_DURATION_MS = 80/)
+  // Motion language (2026-11-24): the panel times are the --rn-d-* tokens, mirrored in design/next/motion.ts.
+  assert.match(panelMotion, /export const WORKBENCH_PANEL_MOTION_DURATION_MS = MOTION_MS\.d2/)
+  assert.match(panelMotion, /export const WORKBENCH_PANEL_REDUCED_MOTION_DURATION_MS = MOTION_MS\.d1/)
 })

@@ -142,7 +142,7 @@ export function PendingClipRow({
                     : isComplete
                       ? 'var(--rn-ok)'
                       : 'var(--rn-ink-3)',
-                  transition: 'width 240ms ease',
+                  transition: 'width var(--rn-d-2) var(--rn-ease-out)',
                 }}
               />
             </div>

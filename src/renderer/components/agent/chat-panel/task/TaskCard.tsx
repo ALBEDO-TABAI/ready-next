@@ -109,6 +109,10 @@ const TASK_CARD_HEADER_STYLE: React.CSSProperties = {
 }
 
 function TaskStepStatusGlyph({ status }: { status: string }) {
+  // A step that turns done or failed while it is on screen lands its new glyph (motion language M2); a list opened
+  // already finished shows its glyphs at rest.
+  const initial = useRef(status)
+  const changed = status !== initial.current
   const config = status === 'done'
     ? { Icon: CircleCheck, label: '步骤已完成' }
     : status === 'running'
@@ -125,7 +129,7 @@ function TaskStepStatusGlyph({ status }: { status: string }) {
       role="img"
       aria-label={config.label}
     >
-      <config.Icon aria-hidden="true" size={12} strokeWidth={1.65} />
+      <config.Icon aria-hidden="true" size={12} strokeWidth={1.65} className={changed ? 'rn-glyph-in' : undefined} />
     </span>
   )
 }
@@ -324,7 +328,7 @@ export function TaskCard({
           if (suppressHeaderClickRef.current) return
           onToggleExpanded?.()
         }}
-        className="w-full max-w-full min-w-0 box-border overflow-hidden hover:bg-[var(--rn-fill)] transition-colors duration-160"
+        className="w-full max-w-full min-w-0 box-border overflow-hidden hover:bg-[var(--rn-fill)] transition-colors duration-(--rn-d-1)"
         style={{ ...TASK_CARD_HEADER_STYLE, paddingRight: dismissible ? 26 : 0 }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
@@ -722,7 +726,7 @@ export function ToolTraceCard({
       <button
         type="button"
         onClick={onToggleExpanded}
-        className="hover:bg-[var(--rn-fill)] transition-colors duration-160"
+        className="hover:bg-[var(--rn-fill)] transition-colors duration-(--rn-d-1)"
         style={CAPSULE_HEADER_STYLE}
       >
         <Wrench

@@ -464,6 +464,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
   const atMenu = showAtMenu && filteredFilePool.length > 0 ? (
     <FloatPanel
+      motion="up"
       ref={atMenuRef}
       style={{
         ...chatMenuSurfaceStyle,
@@ -539,6 +540,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
   const slashMenu = showSlashMenu ? (
     <FloatPanel
+      motion="up"
       ref={slashMenuRef}
       className="panel-hover-scrollbar"
       style={{
@@ -641,6 +643,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
   const authorizationMenu = showAuthorizationModeSelect ? (
     <FloatPanel
+      motion="up"
       ref={authorizationMenuRef}
       data-ready-action-authorization-menu="true"
       style={{
@@ -738,7 +741,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               position: 'relative',
               minHeight: 108,
               gap: 10,
-              transition: 'padding 150ms ease',
+              // No transition: the 1px of padding only offsets the drop border, which changes at once (no jitter).
             }}
           >
           <textarea
@@ -795,7 +798,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 type="button"
                 onClick={onPickFiles}
                 title="添加文件"
-                className="flex items-center justify-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
+                className="flex items-center justify-center active:scale-[0.98] transition-[background-color,transform] duration-(--rn-d-2) ease-out"
                 style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid transparent', background: 'transparent', flexShrink: 0 }}
               >
                 <Plus style={{ width: 14, height: 14 }} className="text-[var(--rn-liquid-ink-2)]" strokeWidth={2} />
@@ -816,7 +819,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       setShowAuthorizationModeSelect((value) => !value)
                     }}
                     title={currentAuthorizationMode.description}
-                    className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
+                    className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-(--rn-d-2) ease-out"
                     style={{
                       padding: '3px 8px',
                       borderRadius: 8,
@@ -833,7 +836,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                         width: 10,
                         height: 10,
                         transform: showAuthorizationModeSelect ? 'rotate(180deg)' : 'rotate(0deg)',
-                        transition: 'transform 200ms ease',
+                        transition: 'transform var(--rn-d-2) var(--rn-ease-std)',
                       }}
                       className="text-[var(--rn-liquid-ink-3)]"
                     />
@@ -855,20 +858,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   aria-busy={stopPending}
                   aria-label={stopPending ? '正在停止' : '停止生成'}
                   title={stopPending ? '正在停止' : '停止生成'}
-                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 16,
-                    background: 'var(--rn-bad)',
-                    color: 'var(--rn-accent-ink)',
-                    cursor: stopPending ? 'wait' : 'pointer',
-                    opacity: stopPending ? 0.62 : 1,
-                  }}
+                  className="ready-composer-action"
+                  style={{ cursor: stopPending ? 'wait' : 'pointer', opacity: stopPending ? 0.62 : 1 }}
                 >
-                  {stopPending
-                    ? <LoaderCircle className="animate-spin" style={{ width: 14, height: 14 }} />
-                    : <Square style={{ width: 12, height: 12 }} strokeWidth={0} fill="currentColor" />}
+                  <ComposerActionGlyphs state={stopPending ? 'stopping' : 'stop'} />
                 </button>
               ) : (
                 <button
@@ -879,19 +872,10 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   disabled={sendDisabled}
                   title={sendBlockedReason || undefined}
                   aria-label={sendBlockedReason || '发送'}
-                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 16,
-                    border: '1px solid color-mix(in srgb, var(--rn-on-inverse) 8%, transparent)',
-                    background: 'var(--rn-inverse)',
-                    color: 'var(--rn-on-inverse)',
-                    boxShadow: 'none',
-                    opacity: sendUnavailable ? 0.38 : 1,
-                  }}
+                  className="ready-composer-action"
+                  style={{ opacity: sendUnavailable ? 0.38 : 1 }}
                 >
-                  <ArrowUp style={{ width: 16, height: 16 }} strokeWidth={2.2} fill="none" />
+                  <ComposerActionGlyphs state="send" />
                 </button>
               )}
             </div>
@@ -907,3 +891,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 })
 
 export default ChatInput
+
+/**
+ * Send and stop are one place in the composer (motion language M2): the two branches above render the same button
+ * element and this same stack of glyphs, so a run starting or ending only crossfades the glyph (arrow ↔ square ↔
+ * spinner) on the button that stays put (liquid-composer.css).
+ */
+function ComposerActionGlyphs({ state }: { state: 'send' | 'stop' | 'stopping' }) {
+  return (
+    <span className="ready-composer-action__glyphs" aria-hidden>
+      <ArrowUp data-shown={state === 'send'} style={{ width: 16, height: 16 }} strokeWidth={2.2} fill="none" />
+      <Square data-shown={state === 'stop'} style={{ width: 12, height: 12 }} strokeWidth={0} fill="currentColor" />
+      <LoaderCircle data-shown={state === 'stopping'} className={state === 'stopping' ? 'animate-spin' : undefined} style={{ width: 14, height: 14 }} />
+    </span>
+  )
+}

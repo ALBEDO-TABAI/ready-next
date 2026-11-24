@@ -9,6 +9,7 @@ import { beginBrowserMask, endPersistentBrowserMask } from '../../overlay/browse
 import { openObjectTarget, type PreviewTarget } from './navigation'
 import { loadObjectPreview, type ObjectPreview } from './preview'
 import { QuickLookBody } from './QuickLookContent'
+import { LeavingDiv } from '../../../components/ui/Leaving'
 
 /** The children are never mounted until native hide has been acknowledged. */
 export function MaskedObjectOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -27,11 +28,12 @@ export function MaskedObjectOverlay({ children, onClose }: { children: React.Rea
     return () => { disposed = true; window.removeEventListener('keydown', escape, true); if (acquired) void endPersistentBrowserMask() }
   }, [onClose])
   if (error) return createPortal(<div role="alert" className="rn-object-ui"><p>{error}</p><button onClick={onClose}>关闭</button></div>, document.body)
-  return ready ? createPortal(<div className="rn-object-ui rn-object-overlay" data-ready-native-overlay="" onClick={onClose}>
-    <section role="dialog" aria-modal="true" className="rn-object-panel rn-float" onClick={event => event.stopPropagation()}>
+  // Arrives like a dialog (scrim fades, panel pops) and fades out in place when closed (motion language M2).
+  return ready ? createPortal(<LeavingDiv className="rn-object-ui rn-object-overlay" data-ready-native-overlay="" onClick={onClose}>
+    <section role="dialog" aria-modal="true" className="rn-object-panel rn-float" data-float-motion="pop" onClick={event => event.stopPropagation()}>
       {children}
     </section>
-  </div>, document.body) : null
+  </LeavingDiv>, document.body) : null
 }
 
 export function QuickLook({ reference, onClose }: { reference: PreviewTarget; onClose: () => void }) {

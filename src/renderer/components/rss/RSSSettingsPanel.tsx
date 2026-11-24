@@ -28,6 +28,7 @@ import {
 } from '../../modules/rss/settings'
 import type { RSSSource } from './RSSFeed'
 import { Button, IconButton } from '../ui/Button'
+import { useLeavingRef } from '../ui/leave'
 
 interface RSSDraftStoreSourceRow {
   sourceId: string
@@ -122,6 +123,7 @@ export default function RSSSettingsPanel({
   onReloadData,
   onOpenExternalServices,
 }: RSSSettingsPanelProps) {
+  const leavingRef = useLeavingRef<HTMLElement>()
   const [draftIntervalMs, setDraftIntervalMs] = useState(autoRefreshIntervalMs)
   const [status, setStatus] = useState<RSSStatusData | null>(null)
   const [diagnostics, setDiagnostics] = useState<RSSDiagnosticsData | null>(null)
@@ -389,7 +391,8 @@ export default function RSSSettingsPanel({
 
   return (
     // A drawer over the content frame in the float material (W1 §4); the native web view steps aside while it is open.
-    <aside className="rss-settings-drawer rn-float" aria-label="RSS 设置" data-ready-native-overlay="">
+    // It slides in from the right (rss-manage.css) and fades out in place when closed (motion language M2).
+    <aside ref={leavingRef} className="rss-settings-drawer rn-float" aria-label="RSS 设置" data-ready-native-overlay="">
       <div className="rss-settings-header">
         <div className="rss-settings-title">
           <Settings />

@@ -6,7 +6,7 @@ export interface ShellSidebarSlot {
   element: HTMLElement | null
   /** The mode whose navigator is shown: the current mode, or in split view the pane last used. */
   mode: WorkbenchMode
-  /** While the shown navigator changes (V23): the one leaving and the direction. */
+  /** While the shown navigator changes (V23): whether it is arriving, the ones leaving and their direction. */
   motion: ShellNavigatorMotion | null
 }
 

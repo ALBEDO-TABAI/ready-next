@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { WorkbenchMode } from '../../../stores/useMode'
 import { ShellSidebarSlotContext } from './sidebar-slot'
+import { navigatorDirection } from './navigator-motion'
 
 // The shell's one sidebar (W2 §2.2). The shell owns the column — width, collapse, the narrow-window
 // card — and each mode renders its own navigator into it through <ShellNavigator>. A portal
@@ -21,16 +22,20 @@ export function ShellNavigator({ mode, label, scopeClassName, children }: {
 }) {
   const slot = useContext(ShellSidebarSlotContext)
   if (!slot.element) return null
-  const shown = slot.mode === mode
-  // While the shown navigator changes (V23) the old one stays on screen until it has left, inert; then it is hidden.
-  const leaving = !shown && slot.motion?.from === mode
-  const motion = leaving ? 'leave' : shown && slot.motion ? 'enter' : undefined
+  // Shown and moving are read from the same state (the motion's current mode), so a change lands in one commit: the new
+  // navigator appears already marked as arriving, which its @starting-style needs (shell.css).
+  const shown = (slot.motion?.current ?? slot.mode) === mode
+  // While the shown navigator changes (V23) each old one stays on screen until it has left, inert; then it is hidden.
+  const leftAs = shown ? undefined : slot.motion?.leaving[mode]
+  const leaving = Boolean(leftAs)
+  const motion = leaving ? 'leave' : shown && slot.motion?.entering ? 'enter' : undefined
+  const direction = leftAs ?? slot.motion?.direction
   return createPortal(
     <section
       className={`shell-navigator${scopeClassName ? ` ${scopeClassName}` : ''}`}
       data-shell-navigator={mode}
       data-nav-motion={motion}
-      data-nav-direction={motion ? slot.motion?.direction : undefined}
+      data-nav-direction={motion && direction ? navigatorDirection(direction) : undefined}
       aria-label={label}
       hidden={!shown && !leaving}
       inert={leaving || undefined}

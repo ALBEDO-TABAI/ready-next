@@ -14,6 +14,7 @@ import { G, gutterWidth, colWidth, hourHeight, minDensityLevel, allDayHeight } f
 import { hourLabel, timeOfFull, wdShort, gmtLabel, panelTime } from '../fmt';
 import { t } from '../i18n';
 import { Chip } from './Chip';
+import { scrollBehavior } from '../../../../design/next/motion'
 
 const TICK = 15;
 type Drag =
@@ -64,7 +65,7 @@ export function TimeGrid({active=true}:{active?:boolean}) {
   }, [hourH, size.h]); // eslint-disable-line
   useEffect(() => {
     const el = scroller.current; if (!el) return;
-    const f = () => { const nowMin = minutesOfDay(Date.now(), tz); el.scrollTo({ top: Math.max(0, (nowMin - 120) / 60 * hourH), behavior: 'smooth' }); };
+    const f = () => { const nowMin = minutesOfDay(Date.now(), tz); el.scrollTo({ top: Math.max(0, (nowMin - 120) / 60 * hourH), behavior: scrollBehavior() }); };
     el.addEventListener('tempo-scroll-now', f); return () => el.removeEventListener('tempo-scroll-now', f);
   }, [hourH, tz]);
 

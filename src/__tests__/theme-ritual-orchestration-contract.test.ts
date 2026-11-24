@@ -55,7 +55,7 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.doesNotMatch(styles, /html\[data-theme-transitioning='true'\] body/)
 
   // Safety body-level transition remains for reduce-motion users who bypass the overlay.
-  assert.match(styles, /body\s*\{\s*transition:\s*background-color 140ms ease/)
+  assert.match(styles, /body\s*\{\s*transition:\s*background-color var\(--rn-d-1\) var\(--rn-ease-std\)/)
 
   // App shell keeps the app itself as the glass state; no dedicated transition base layer.
   assert.doesNotMatch(app, /ready-theme-ritual-base/)

@@ -171,13 +171,14 @@
   height: 100%;
   background: var(--rn-ink-3);
   transform-origin: left center;
-  animation: browser-page-progress 1.5s var(--rn-ease-in-out) infinite;
+  /* Forward only (motion language M2): quick at first, ever slower towards nine tenths, and it stays there until the
+     page has loaded; a loop that restarts reads as going backwards. */
+  animation: browser-page-progress calc(var(--rn-d-loop) * 5) var(--rn-ease-out) both;
 }
 
 @keyframes browser-page-progress {
-  0% { transform: scaleX(.05); }
-  50% { transform: scaleX(.65); }
-  100% { transform: scaleX(.95); }
+  from { transform: scaleX(.04); }
+  to { transform: scaleX(.9); }
 }
 
 @media (prefers-reduced-motion: reduce) {

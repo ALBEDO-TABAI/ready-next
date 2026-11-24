@@ -528,7 +528,7 @@
 
 .rss-item-actions > .rn-icon-btn {
   color: var(--rn-ink-3);
-  transition: opacity var(--rn-d-1) var(--rss-ease), background-color var(--rn-d-1) var(--rss-ease), color var(--rn-d-1) var(--rss-ease);
+  transition: opacity var(--rn-d-1) var(--rss-ease), background-color var(--rn-d-1) var(--rss-ease), color var(--rn-d-1) var(--rss-ease), transform var(--rn-d-release) var(--rn-ease-spring);
 }
 
 .rss-item-actions > .rn-icon-btn:hover,

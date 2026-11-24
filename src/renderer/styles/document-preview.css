@@ -186,7 +186,7 @@
   text-decoration-color: var(--rn-ink-4);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.26em;
-  transition: color 160ms var(--rd-ease), text-decoration-color 160ms var(--rd-ease);
+  transition: color var(--rn-d-1) var(--rd-ease), text-decoration-color var(--rn-d-1) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-markdown-link > svg {
@@ -201,7 +201,7 @@
   color: var(--rd-3);
   font-size: 0.78em;
   transform: translateY(-0.1em);
-  transition: color 160ms var(--rd-ease), transform 160ms var(--rd-ease);
+  transition: color var(--rn-d-1) var(--rd-ease), transform var(--rn-d-2) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-markdown-link:hover {
@@ -269,7 +269,7 @@
   box-shadow: none;
   color: var(--rd-3);
   opacity: 0;
-  transition: opacity 160ms var(--rd-ease), background-color 160ms var(--rd-ease), color 160ms var(--rd-ease);
+  transition: opacity var(--rn-d-1) var(--rd-ease), background-color var(--rn-d-1) var(--rd-ease), color var(--rn-d-1) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-code-block:hover .note-preview-code-copy-button,
@@ -509,7 +509,7 @@
 }
 
 .note-preview-shell .note-preview-markdown-tbody .note-preview-markdown-tr {
-  transition: background-color 140ms var(--rd-ease);
+  transition: background-color var(--rn-d-1) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-markdown-tbody .note-preview-markdown-tr:hover {
@@ -551,7 +551,7 @@
   border: solid var(--rd-2);
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(-45deg);
-  transition: transform 200ms var(--rd-ease);
+  transition: transform var(--rn-d-2) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-details[open] > .note-preview-details-summary::before {
@@ -710,7 +710,7 @@
   font-size: var(--rn-t-micro);
   font-weight: 500;
   letter-spacing: 0.02em;
-  transition: border-color 160ms var(--rd-ease), color 160ms var(--rd-ease), background-color 160ms var(--rd-ease);
+  transition: border-color var(--rn-d-1) var(--rd-ease), color var(--rn-d-1) var(--rd-ease), background-color var(--rn-d-1) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-chip > svg {
@@ -807,7 +807,7 @@
   color: var(--rd-ink);
   font-size: 12px;
   font-weight: 500;
-  transition: background-color 160ms var(--rd-ease), border-color 160ms var(--rd-ease);
+  transition: background-color var(--rn-d-1) var(--rd-ease), border-color var(--rn-d-1) var(--rd-ease);
 }
 
 .note-preview-shell .note-preview-repair-button:hover {

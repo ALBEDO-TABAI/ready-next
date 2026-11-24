@@ -25,6 +25,7 @@ import {
   getPdfPageRenderRange,
 } from '../../modules/document/pdfPageWindow'
 import { recordDocumentPerformanceMaximum } from '../../../shared/document-performance-diagnostics'
+import { scrollBehavior } from '../../design/next/motion'
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -140,7 +141,7 @@ function highlightPdfRange(layer: Element, start: number, end: number): () => vo
     // pdf.js's "highlight appended" keeps the mark in the text flow (text layer spans are absolutely positioned).
     const mark = document.createElement('span'); mark.className = 'highlight appended'; mark.dataset.readyPdfHighlight = 'true'
     // The text layer sits over the rendered page, so the mark has to stay translucent to keep the quote readable.
-    Object.assign(mark.style, { backgroundColor: 'var(--rn-hl)', mixBlendMode: 'multiply', borderRadius: '2px', transition: 'background-color 400ms ease' })
+    Object.assign(mark.style, { backgroundColor: 'var(--rn-hl)', mixBlendMode: 'multiply', borderRadius: '2px', transition: 'background-color var(--rn-d-2) var(--rn-ease-std)' })
     range.surroundContents(mark); marks.push(mark)
   }
   return () => { for (const mark of marks) mark.replaceWith(...mark.childNodes) }
@@ -374,7 +375,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   // Scroll to page
   const goToPage = useCallback((page: number) => {
     const el = pageRefs.current.get(page)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (el) el.scrollIntoView({ behavior: scrollBehavior(), block: 'start' })
   }, [])
 
   const prevPage = useCallback(() => {

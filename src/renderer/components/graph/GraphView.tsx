@@ -34,6 +34,7 @@ import {
 } from './graph-view-model'
 import type { GraphNode, GraphQuery } from './graph-types'
 import { buildGraphTopology } from './graph-topology'
+import { LeavingDiv } from '../ui/Leaving'
 
 export interface GraphViewProps {
   centerPath?: string
@@ -432,7 +433,7 @@ export default function GraphView({
         }}
       />
       {hoveredPreview && (
-        <div
+        <LeavingDiv
           className="knowledge-graph-preview rn-float"
           data-graph-document-preview="true"
           role="tooltip"
@@ -441,7 +442,7 @@ export default function GraphView({
           <strong>{hoveredPreview.title}</strong>
           <p>{hoveredPreview.status === 'loading' ? '正在读取文档预览…' : hoveredPreview.body}</p>
           <span>点击在文档模式打开</span>
-        </div>
+        </LeavingDiv>
       )}
       {showInitialLoader && <div className="knowledge-graph-status">正在加载图谱…</div>}
       {snapshot.status === 'loading' && snapshot.graph.nodes.length > 0 && (

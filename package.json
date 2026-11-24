@@ -11,7 +11,7 @@
   "scripts": {
     "licenses:generate": "node scripts/generate-third-party-notices.cjs",
     "test:licenses": "node --test scripts/__tests__/third-party-notices.test.cjs && node --import tsx --test src/__tests__/third-party-notices-ipc.test.ts",
-    "verify:design-tokens": "node scripts/check-design-tokens.cjs && node --test scripts/__tests__/check-design-tokens.test.cjs",
+    "verify:design-tokens": "node scripts/check-design-tokens.cjs && node --test scripts/__tests__/check-design-tokens.test.cjs && node scripts/check-motion.cjs && node --test scripts/__tests__/check-motion.test.cjs",
     "verify:ready-next-design-matrix": "node scripts/verify-ready-next-design-matrix.cjs",
     "verify:ready-next-rss-sieve": "node scripts/verify-ready-next-rss-sieve-electron.cjs",
     "verify:ready-next-shell": "node scripts/verify-ready-next-shell.cjs",

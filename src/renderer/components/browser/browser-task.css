@@ -118,7 +118,7 @@
   border-radius: 50%;
   background: currentColor;
   vertical-align: middle;
-  animation: rn-task-running 1.6s var(--rn-ease-in-out) infinite;
+  animation: rn-task-running var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 @keyframes rn-task-running {

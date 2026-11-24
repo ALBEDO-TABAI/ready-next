@@ -95,10 +95,10 @@ test('DB-B native: stale cell conflicts; dirty receipt is visibly unsaved until 
   await click(ui, '[aria-label="重新读取数据库"]')
   dirty = true; buffer = external + '未保存正文\n'
   await click(ui, cell); await input(ui, '[aria-label="字段值"]', '缓冲值'); await click(ui, '[aria-label="保存单元格"]')
-  assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /已合入未保存缓冲/)
+  assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /有改动待保存/)
   assert.equal(f.read(), external); assert.match(buffer, /文本: 缓冲值/)
   assert.equal(ui.host.querySelector(cell)?.textContent, '缓冲值')
-  await click(ui, '[aria-label="重新读取数据库"]'); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /未保存缓冲/)
+  await click(ui, '[aria-label="重新读取数据库"]'); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /有改动待保存/)
   dirty = false; writeFileSync(f.paths[0], buffer)
   await changed(f.paths[0]); assert.match(ui.host.querySelector('.rdb-status')?.textContent ?? '', /已保存/)
   assert.equal(ui.host.querySelector(cell)?.textContent, '缓冲值'); assert.ok(f.read().endsWith('未保存正文\n'))

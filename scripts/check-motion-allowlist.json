@@ -1,0 +1,110 @@
+[
+  {
+    "file": "src/renderer/modules/document/database/database.css",
+    "kind": "css-easing",
+    "max": 2,
+    "reason": "Scroll-driven sticky backing (animation-timeline: scroll()): linear maps scroll offset to opacity, there is no time curve."
+  },
+  {
+    "file": "src/renderer/modules/library/BookOpen.tsx",
+    "kind": "ts-literal",
+    "max": 1,
+    "reason": "The book-opening WAAPI choreography (650ms, reduced motion 0)."
+  },
+  {
+    "file": "src/renderer/modules/library/library.css",
+    "kind": "css-duration",
+    "max": 2,
+    "reason": "The library’s open-book move and cover turn."
+  },
+  {
+    "file": "src/renderer/modules/library/library.css",
+    "kind": "css-easing",
+    "max": 1,
+    "reason": "The library’s open-book move and cover turn."
+  },
+  {
+    "file": "src/renderer/modules/library/reader.css",
+    "kind": "css-duration",
+    "max": 6,
+    "reason": "The library reader’s book-open choreography (dock and panel entrances, the page turn)."
+  },
+  {
+    "file": "src/renderer/modules/library/reader.css",
+    "kind": "css-easing",
+    "max": 1,
+    "reason": "The library reader’s book-open choreography (dock and panel entrances, the page turn)."
+  },
+  {
+    "file": "src/renderer/modules/library/shelf.css",
+    "kind": "css-duration",
+    "max": 21,
+    "reason": "The library’s shelf choreography (books dropping in, sliding along the shelf, the fresh-book arc): a designed module scene with its own --rn-ease-shelf rhythm; reduced motion stills it (library.css)."
+  },
+  {
+    "file": "src/renderer/modules/library/shelf.css",
+    "kind": "css-easing",
+    "max": 2,
+    "reason": "The library’s shelf choreography (books dropping in, sliding along the shelf, the fresh-book arc): a designed module scene with its own --rn-ease-shelf rhythm; reduced motion stills it (library.css)."
+  },
+  {
+    "file": "src/renderer/modules/library/shelf.css",
+    "kind": "css-layout",
+    "max": 1,
+    "reason": "The library’s shelf choreography (books dropping in, sliding along the shelf, the fresh-book arc): a designed module scene with its own --rn-ease-shelf rhythm; reduced motion stills it (library.css)."
+  },
+  {
+    "file": "src/renderer/pages/settings/settings.css",
+    "kind": "css-layout",
+    "max": 1,
+    "reason": "A small determinate progress fill in settings (width of a pill; scaleX would squash its rounded ends)."
+  },
+  {
+    "file": "src/renderer/styles/base-chrome.css",
+    "kind": "css-duration",
+    "max": 3,
+    "reason": "The theme ritual’s tint and window-ground layers, timed by --ritual-hold-duration with the ritual overlay."
+  },
+  {
+    "file": "src/renderer/styles/base-chrome.css",
+    "kind": "css-easing",
+    "max": 3,
+    "reason": "The theme ritual’s tint and window-ground layers, timed by --ritual-hold-duration with the ritual overlay."
+  },
+  {
+    "file": "src/renderer/styles/flat-chrome.css",
+    "kind": "css-layout",
+    "max": 3,
+    "reason": "Docked panels open and close by width (M4): the content column must reflow; --rn-d-2, off while dragging (body.resizing) and under reduced motion."
+  },
+  {
+    "file": "src/renderer/styles/ritual-overlay.css",
+    "kind": "css-duration",
+    "max": 19,
+    "reason": "The theme ritual (sun/moon choreography over a blur, timed with the native theme switch in useRitualOverlay.ts): a one-off choreography with its own --ritual-* durations, outside the everyday scale (M1 d-4/d-5 rule)."
+  },
+  {
+    "file": "src/renderer/styles/ritual-overlay.css",
+    "kind": "css-easing",
+    "max": 18,
+    "reason": "The theme ritual (sun/moon choreography over a blur, timed with the native theme switch in useRitualOverlay.ts): a one-off choreography with its own --ritual-* durations, outside the everyday scale (M1 d-4/d-5 rule)."
+  },
+  {
+    "file": "src/renderer/styles/rss-workspace.css",
+    "kind": "css-layout",
+    "max": 1,
+    "reason": "The RSS search field widening on focus (a single small control)."
+  },
+  {
+    "file": "src/renderer/styles/workbench-surfaces.css",
+    "kind": "css-duration",
+    "max": 1,
+    "reason": "The pet sprite’s frame cycle (step-end over a sprite sheet) and its note expanding to show its text (max-height of a small card); reduced motion stills the sprite."
+  },
+  {
+    "file": "src/renderer/styles/workbench-surfaces.css",
+    "kind": "css-layout",
+    "max": 1,
+    "reason": "The pet sprite’s frame cycle (step-end over a sprite sheet) and its note expanding to show its text (max-height of a small card); reduced motion stills the sprite."
+  }
+]

@@ -51,7 +51,7 @@
 .ink-sb-icon-glyph { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; }
 .ink-sb-disclosure { position: absolute; inset: 0 1px; display: none; align-items: center; justify-content: center; border-radius: var(--rn-r-xs); color: var(--rn-ink-2); border: 0; background: none; padding: 0; }
 .ink-sb-disclosure:hover { background: var(--rn-fill-2); color: var(--rn-ink); }
-.ink-sb-disclosure svg { transition: transform var(--rn-d-2) var(--rn-ease-out); }
+.ink-sb-disclosure svg { transition: transform var(--rn-d-2) var(--rn-ease-std); }
 .ink-sb-tree:hover .ink-sb-disclosure, .ink-sb-tree:focus-within .ink-sb-disclosure { display: flex; }
 .ink-sb-tree:hover .ink-sb-icon-glyph, .ink-sb-tree:focus-within .ink-sb-icon-glyph { visibility: hidden; }
 .ink-sb-row-actions { display: none; align-items: center; gap: 2px; margin-left: 4px; margin-right: -4px; }
@@ -283,7 +283,7 @@
 .ink-scope .ink-main [aria-label='关联面板'] { border-top: .5px solid var(--rn-hair); padding: 6px 16px; font-size: var(--rn-fs-sm); color: var(--rn-ink-2); background: transparent; }
 .ink-scope .ink-main [aria-label='关联面板'] summary { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; margin-left: -10px; border-radius: var(--rn-r-pill); cursor: pointer; list-style: none; user-select: none; }
 .ink-scope .ink-main [aria-label='关联面板'] summary::-webkit-details-marker { display: none; }
-.ink-scope .ink-main [aria-label='关联面板'] summary::before { content: '›'; display: inline-block; transition: transform var(--rn-d-2) var(--rn-ease-out); color: var(--rn-ink-3); }
+.ink-scope .ink-main [aria-label='关联面板'] summary::before { content: '›'; display: inline-block; transition: transform var(--rn-d-2) var(--rn-ease-std); color: var(--rn-ink-3); }
 .ink-scope .ink-main [aria-label='关联面板'] details[open] > summary::before { transform: rotate(90deg); }
 .ink-scope .ink-main [aria-label='关联面板'] summary:hover { background: var(--rn-fill-2); color: var(--rn-ink); }
 .ink-scope .ink-main [aria-label='关联面板'] h3 { margin: 10px 0 4px; font-size: var(--rn-fs-xs); font-weight: 500; letter-spacing: .035em; color: var(--rn-ink-3); }
@@ -336,11 +336,8 @@
 .ink-scope .ready-database .rdb-empty { color: var(--rn-ink-3); font-size: var(--rn-fs-md); }
 
 /* ---------------- ⌘K and quick look: Inkwell's search palette on the float material (DL4) ---------------- */
-.rn-object-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: color-mix(in srgb, var(--rn-inverse) 18%, transparent); animation: rn-fade-in var(--rn-d-1) var(--rn-ease-out); }
-.rn-object-panel { width: min(680px, 90vw); max-height: 72vh; overflow: auto; color: var(--rn-ink); font-size: 14px; line-height: 20px; animation: rn-pop-in var(--rn-d-2) var(--rn-ease-out); }
-@keyframes rn-fade-in { from { opacity: 0; } }
-@keyframes rn-pop-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
-@media (prefers-reduced-motion: reduce) { .rn-object-overlay, .rn-object-panel { animation: none; } }
+.rn-object-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: color-mix(in srgb, var(--rn-inverse) 18%, transparent); animation: rn-fade-in var(--rn-d-2) var(--rn-ease-std) both; }
+.rn-object-panel { width: min(680px, 90vw); max-height: 72vh; overflow: auto; color: var(--rn-ink); font-size: 14px; line-height: 20px; }
 .rn-object-panel:not(:has(.rn-switch-input)) { padding: 20px; }
 .rn-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .rn-switch-input { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 18px; color: var(--rn-ink-2); box-shadow: inset 0 -.5px 0 var(--rn-hair); background: inherit; }

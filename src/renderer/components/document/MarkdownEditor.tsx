@@ -47,6 +47,7 @@ import {
 } from '../../modules/document/documentSaveRegistry'
 import { saveDocumentTabSnapshot } from '../../modules/document/documentSaveRuntime'
 import '../../styles/document-widget-editor.css'
+import { flashElement } from '../../design/next/motion'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -943,7 +944,7 @@ export default function MarkdownEditor({
       if (targetBlock) {
         const containerTop = surface.getBoundingClientRect().top
         scrollToTop(targetBlock.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
-        targetBlock.animate?.([{ backgroundColor: 'var(--rn-accent-soft)' }, { backgroundColor: 'transparent' }], { duration: 1200, easing: 'ease-out' })
+        flashElement(targetBlock)
         setPendingReveal(null)
         return
       }
@@ -981,7 +982,7 @@ export default function MarkdownEditor({
 
     return (
       <div className="flex items-center justify-center py-10">
-        <span style={{ color: 'var(--rn-ink-2)', fontSize: 13 }}>加载中...</span>
+        <span style={{ color: 'var(--rn-ink-2)', fontSize: 13 }}>正在加载…</span>
       </div>
     )
   }

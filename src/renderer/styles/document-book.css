@@ -45,7 +45,7 @@
   border-radius: 4px;
   background: linear-gradient(105deg, #232833 0%, #2c3340 55%, #232833 100%);
   box-shadow: 0 18px 36px rgba(25, 20, 14, 0.3);
-  animation: document-book-loading-breathe 1.6s ease-in-out infinite;
+  animation: document-book-loading-breathe var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 .document-book-reading__loading-text {
   font-size: 12px;
@@ -371,7 +371,7 @@
 .document-book-stage__book {
   position: relative;
   transform-style: preserve-3d;
-  transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--rn-d-4) var(--rn-ease-in-out);
 }
 .document-book-stage__book-shadow {
   position: absolute;

@@ -129,7 +129,7 @@ export function ProjectSelector() {
       </button>
     </div>
     {error && <div role="alert" className="ready-chat-project-error">{error}</div>}
-    {open && frame && createPortal(<FloatPanel ref={menu} role="dialog" aria-label="选择项目" style={{
+    {open && frame && createPortal(<FloatPanel ref={menu} motion="up" role="dialog" aria-label="选择项目" style={{
       ...chatMenuSurfaceStyle, position: 'fixed', zIndex: 540, ...frame,
     }} contentStyle={{ padding: 8, maxHeight: frame.maxHeight, overflowY: 'auto', overflowX: 'hidden' }}>
       <label className="ready-chat-project-search"><Search size={15} /><input autoFocus aria-label="搜索项目"

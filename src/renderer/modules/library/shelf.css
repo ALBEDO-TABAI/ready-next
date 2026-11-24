@@ -28,7 +28,7 @@
 .rn-library .bk-x[data-jump], .rn-library .bk-y[data-jump] { transition: none; }
 .rn-library .bk-in { transition: opacity .4s var(--rn-ease-out), transform .5s var(--rn-ease-out); }
 .rn-library .bk-in[data-out] { opacity: 0; transform: translateY(-34px) rotate(-2deg); pointer-events: none; }
-.rn-library .is-entering .bk-in:not([data-out]) { animation: rn-library-bookDrop .75s var(--rn-ease-out) both; animation-delay: calc(var(--i) * 26ms + 120ms); }
+.rn-library .is-entering .bk-in:not([data-out]) { animation: rn-library-bookDrop .75s var(--rn-ease-out) both; animation-delay: calc(min(var(--i), 24) * 26ms + 120ms); } /* capped: every book has landed before Shelf.tsx drops .is-entering at 1.8s, none snaps */
 @keyframes rn-library-bookDrop { from { opacity: 0; transform: translateY(-40px); } }
 .rn-library .bk-in[data-fresh] { animation: rn-library-bookFresh 1.2s var(--rn-ease-out) both; }
 .rn-library .bk-in[data-fresh] .spine { box-shadow: 0 0 0 2px var(--rn-stage), 0 0 0 4px var(--rn-accent), 3px 0 6px -3px rgb(var(--rn-shade) / .35); }

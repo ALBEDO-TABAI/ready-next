@@ -886,7 +886,7 @@ export default function FileTree({
     const targetDir = getTargetDirFromDropTarget(target)
     const dirName = targetDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || targetDir
     endGeneratedImageDrag()
-    showMoveNotice(`正在保存图片到 ${dirName}...`)
+    showMoveNotice(`正在保存图片到 ${dirName}…`)
     try {
       const result = await window.electronAPI.imageGeneration.persistToDirectory({
         sourcePath: payload.path,

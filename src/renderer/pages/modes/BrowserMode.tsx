@@ -1464,7 +1464,7 @@ export default function BrowserMode({
                       borderRadius: '50%',
                       border: '2px solid var(--rn-hair-2)',
                       borderTopColor: 'var(--rn-ink-3)',
-                      animation: 'browserStartupSpinner 0.8s linear infinite',
+                      animation: 'browserStartupSpinner var(--rn-d-spin) linear infinite',
                     }}
                   />
                 </div>

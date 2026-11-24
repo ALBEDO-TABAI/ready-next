@@ -16,6 +16,7 @@ import type {
   SkillConfigurationView,
   SkillConfigValue,
 } from '../../../shared/skill-configuration'
+import { StableLabel } from '../ui/StableLabel'
 
 interface SkillActionDefinition {
   name: string
@@ -579,7 +580,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-(--rn-d-1) hover:bg-[var(--rn-fill)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
@@ -666,7 +667,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
 
               {customSkills.length === 0 ? (
                 <p className="text-[11px] font-medium" style={{ color: PANEL_COLORS.mutedStrong }}>
-                  {loading ? '加载中...' : '暂无用户导入 Skill'}
+                  {loading ? '正在加载…' : '暂无用户导入 Skill'}
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -677,7 +678,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-(--rn-d-1) hover:bg-[var(--rn-fill)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
@@ -780,7 +781,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                   {externalCandidates.map((candidate) => (
                     <div
                       key={candidate.path}
-                      className="rounded-[8px] border transition-colors duration-150 hover:bg-[var(--rn-fill)]"
+                      className="rounded-[8px] border transition-colors duration-(--rn-d-1) hover:bg-[var(--rn-fill)]"
                       style={{ borderRadius: 8, border: '1px solid transparent', padding: '10px 12px' }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1014,7 +1015,7 @@ function DescriptionEditorDialog({
               取消
             </Button>
             <Button variant="primary" onClick={onSave} disabled={saving}>
-              {saving ? '保存中...' : '保存'}
+              <StableLabel reserve={['保存', '正在保存…']}>{saving ? '正在保存…' : '保存'}</StableLabel>
             </Button>
           </div>
         </div>
@@ -1308,7 +1309,7 @@ function SkillConfigurationDialog({
             取消
           </Button>
           <Button variant="primary" onClick={() => { void save() }} disabled={saving || loading || !hasConfig}>
-            {saving ? '保存中...' : '保存'}
+            <StableLabel reserve={['保存', '正在保存…']}>{saving ? '正在保存…' : '保存'}</StableLabel>
           </Button>
         </div>
       </div>

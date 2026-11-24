@@ -1,5 +1,6 @@
 import { type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent } from 'react'
 import { LayoutGroup, MotionConfig, motion, useReducedMotion } from 'framer-motion'
+import { REDUCED_TRANSITION, SPRING_INDICATOR, SPRING_PILL } from '../../design/next/motion'
 
 type ItemEvent = MouseEvent<HTMLButtonElement>
 type ItemKeyboardEvent = KeyboardEvent<HTMLButtonElement>
@@ -30,9 +31,8 @@ interface MorphSegmentedControlProps {
   contentClassName?: string
 }
 
-const SPRING_TRANSITION = { type: 'spring', stiffness: 460, damping: 22, mass: 0.6 } as const
-const REDUCED_TRANSITION = { duration: 0.01 } as const
-const PILL_TRANSITION = { type: 'spring', stiffness: 430, damping: 17, mass: 0.62 } as const
+const SPRING_TRANSITION = SPRING_INDICATOR
+const PILL_TRANSITION = SPRING_PILL
 
 export default function MorphSegmentedControl({
   items,

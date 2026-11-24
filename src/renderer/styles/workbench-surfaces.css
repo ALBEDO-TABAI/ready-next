@@ -428,3 +428,8 @@ body.pet-window-body {
   border: 0 !important;
   box-shadow: none !important;
 }
+
+/* Reduced motion (motion language M5): the pet holds a still frame. */
+@media (prefers-reduced-motion: reduce) {
+  .pet-sprite { animation: none; }
+}

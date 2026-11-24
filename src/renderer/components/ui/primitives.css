@@ -10,7 +10,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     height: var(--rn-control-h-lg); padding: 0 16px; border: 0; border-radius: var(--rn-r-pill);
     font: 500 var(--rn-t-body)/1 var(--rn-font-ui); white-space: nowrap; cursor: pointer;
-    transition: transform 520ms var(--rn-ease-spring), background-color var(--rn-d-2) var(--rn-ease-std), color var(--rn-d-2) var(--rn-ease-std), box-shadow var(--rn-d-2) var(--rn-ease-std), filter var(--rn-d-1);
+    transition: transform var(--rn-d-release) var(--rn-ease-spring), background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std), box-shadow var(--rn-d-1) var(--rn-ease-std), filter var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-btn[data-size='sm'] { height: var(--rn-control-h); padding: 0 12px; font-size: var(--rn-t-meta); }
   /* primary: ink glass, darker toward the bottom, a top highlight and a drop shadow (dark: white glass) */
@@ -31,7 +31,7 @@
     display: inline-grid; place-items: center; flex: none;
     width: var(--rn-control-h); height: var(--rn-control-h); padding: 0; border: 0; border-radius: var(--rn-r-pill);
     background: transparent; color: var(--rn-ink-2); cursor: pointer;
-    transition: transform 520ms var(--rn-ease-spring), background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
+    transition: transform var(--rn-d-release) var(--rn-ease-spring), background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-icon-btn[data-size='sm'] { width: 24px; height: 24px; }
   .rn-icon-btn[data-size='lg'] { width: var(--rn-control-h-lg); height: var(--rn-control-h-lg); }
@@ -40,7 +40,7 @@
   .rn-icon-btn:disabled { color: var(--rn-ink-4); cursor: default; pointer-events: none; }
   .rn-icon-btn svg { width: var(--rn-icon); height: var(--rn-icon); stroke-width: var(--rn-icon-stroke); }
   .rn-icon-btn[data-size='sm'] svg { width: 14px; height: 14px; }
-  :is(.rn-btn, .rn-icon-btn):active:not(:disabled) { transform: scale(.94); transition-duration: 110ms; transition-timing-function: var(--rn-ease-out); }
+  :is(.rn-btn, .rn-icon-btn):active:not(:disabled) { transform: scale(.94); transition-duration: var(--rn-d-1); transition-timing-function: var(--rn-ease-out); }
 
   /* ---- Field: a capsule in the well material; a textarea keeps a 12px radius ---- */
   .rn-field {
@@ -48,7 +48,7 @@
     border: 0; border-radius: var(--rn-r-control); background: var(--rn-well);
     box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair);
     font: 400 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui); color: var(--rn-ink);
-    transition: box-shadow var(--rn-d-1) var(--rn-ease-std), background-color var(--rn-d-1);
+    transition: box-shadow var(--rn-d-1) var(--rn-ease-std), background-color var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-field::placeholder { color: var(--rn-ink-3); }
   .rn-field:hover { box-shadow: inset 0 1px 2px var(--rn-well-shade), inset 0 0 0 .5px var(--rn-hair-2); }
@@ -81,11 +81,11 @@
   .rn-check__box {
     display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; padding: 0; border: 0;
     border-radius: 5px; background: var(--rn-solid); box-shadow: inset 0 0 0 1px var(--rn-hair-2); color: var(--rn-on-inverse);
-    cursor: pointer; transition: background-color var(--rn-d-1), box-shadow var(--rn-d-1);
+    cursor: pointer; transition: background-color var(--rn-d-1) var(--rn-ease-std), box-shadow var(--rn-d-1) var(--rn-ease-std);
   }
-  .rn-check__box svg { width: 12px; height: 12px; stroke-width: 3; opacity: 0; }
+  .rn-check__box svg { width: 12px; height: 12px; stroke-width: 3; opacity: 0; transform: scale(.6); transition: opacity var(--rn-d-1) var(--rn-ease-std), transform var(--rn-d-2) var(--rn-ease-spring); }
   .rn-check__box[aria-checked='true'], .rn-check__box[aria-checked='mixed'] { background: var(--rn-inverse); box-shadow: none; }
-  .rn-check__box[aria-checked='true'] svg, .rn-check__box[aria-checked='mixed'] svg { opacity: 1; }
+  .rn-check__box[aria-checked='true'] svg, .rn-check__box[aria-checked='mixed'] svg { opacity: 1; transform: none; }
   .rn-check__box:disabled { opacity: .45; cursor: default; }
 
   .rn-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); }
@@ -108,6 +108,7 @@
   .rn-menu__item {
     display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: var(--rn-r-sm);
     background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+    transition: background-color var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-menu__item[data-highlighted='true'] { background: var(--rn-fill-2); }
   .rn-menu__item[aria-disabled='true'] { opacity: .45; cursor: default; }
@@ -137,9 +138,9 @@
   /* ---- Toast ---- */
   /* In the bottom band (DL11a: the quiet band shows one line of status when needed), so it never covers the paper or the native web page. */
   .rn-toast-stack { position: fixed; left: 50%; bottom: calc((var(--rn-band-h) - 36px) / 2); z-index: 6000; display: flex; flex-direction: column; align-items: center; gap: 6px; transform: translateX(-50%); pointer-events: none; }
-  .rn-toast { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 8px 0 14px; font: 500 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui); color: var(--rn-ink); pointer-events: auto; animation: rn-toast-in var(--rn-d-2) var(--rn-ease-std); }
+  .rn-toast { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 8px 0 14px; font: 500 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui); color: var(--rn-ink); pointer-events: auto; animation: rn-toast-in var(--rn-d-2) var(--rn-ease-out) both; }
   .rn-toast[data-tone='bad'] { color: var(--rn-bad); }
-  @keyframes rn-toast-in { from { opacity: 0; transform: translateY(6px); } }
+  @keyframes rn-toast-in { from { opacity: 0; transform: translate3d(0, var(--rn-shift-2), 0); } }
 
   /* ---- Tabs: the selected tab is --rn-fill-2 + ink + 500 ---- */
   .rn-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
@@ -147,12 +148,12 @@
     position: relative; display: inline-flex; align-items: center; gap: 8px; height: var(--rn-control-h); max-width: 200px;
     padding: 0 12px; border: 0; border-radius: var(--rn-r-sm); background: transparent; color: var(--rn-ink-2);
     font: 400 var(--rn-t-body)/1 var(--rn-font-ui); white-space: nowrap; cursor: pointer;
-    transition: background-color var(--rn-d-1), color var(--rn-d-1);
+    transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-tab:hover { background: var(--rn-fill); color: var(--rn-ink); }
   .rn-tab[aria-selected='true'] { background: var(--rn-fill-2); color: var(--rn-ink); font-weight: 500; }
   .rn-tab__label { overflow: hidden; text-overflow: ellipsis; }
-  .rn-tab__close { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: -6px; border-radius: var(--rn-r-pill); color: var(--rn-ink-3); opacity: 0; }
+  .rn-tab__close { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: -6px; border-radius: var(--rn-r-pill); color: var(--rn-ink-3); opacity: 0; transition: opacity var(--rn-d-1) var(--rn-ease-std), background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std); }
   .rn-tab:hover .rn-tab__close, .rn-tab[aria-selected='true'] .rn-tab__close { opacity: 1; }
   .rn-tab__close:hover { background: var(--rn-fill-2); color: var(--rn-ink); }
   .rn-tab__close svg { width: 12px; height: 12px; }
@@ -161,6 +162,7 @@
   .rn-row {
     display: flex; align-items: center; gap: 8px; width: 100%; height: var(--rn-row-h); padding: 0 10px; border: 0; border-radius: var(--rn-r-sm);
     background: transparent; color: var(--rn-ink-2); font: 400 var(--rn-t-body)/1 var(--rn-font-ui); text-align: left; white-space: nowrap; overflow: hidden; cursor: pointer;
+    transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
   }
   .rn-row:hover { background: var(--rn-fill); color: var(--rn-ink); }
   .rn-row[aria-current]:not([aria-current='false']) { background: var(--rn-fill-2); color: var(--rn-ink); font-weight: 500; }
@@ -185,13 +187,19 @@
   .rn-chip svg { width: 14px; height: 14px; }
   .rn-kbd { display: inline-block; padding: 4px 6px; border-radius: 5px; background: var(--rn-fill-2); color: var(--rn-ink-2); font: 500 var(--rn-t-micro)/1 var(--rn-font-mono); }
 
+  /* ---- StableLabel: a state label that keeps its button's width (StableLabel.tsx) ---- */
+  .rn-stable-label { display: inline-grid; justify-items: center; }
+  .rn-stable-label > span, .rn-stable-label::after { grid-area: 1 / 1; }
+  .rn-stable-label::after { content: attr(data-reserve); visibility: hidden; }
+
   /* ---- EmptyState / Skeleton ---- */
   .rn-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px 16px; text-align: center; color: var(--rn-ink-3); }
   .rn-empty svg { width: 22px; height: 22px; stroke-width: 1.5; }
   .rn-empty__title { font: 500 var(--rn-t-body)/var(--rn-lh-body) var(--rn-font-ui); color: var(--rn-ink-2); }
   .rn-empty__body { max-width: 280px; font-size: var(--rn-t-meta); line-height: var(--rn-lh-meta); }
-  .rn-skeleton { border-radius: 6px; background: linear-gradient(90deg, var(--rn-fill) 0%, var(--rn-fill-2) 50%, var(--rn-fill) 100%); background-size: 200% 100%; animation: rn-skeleton 1.4s ease-in-out infinite; }
-  @keyframes rn-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  /* a skeleton breathes (opacity, on the compositor) rather than sweeping a gradient that repaints every frame (M4) */
+  .rn-skeleton { border-radius: 6px; background: var(--rn-fill-2); animation: rn-skeleton var(--rn-d-loop) var(--rn-ease-in-out) infinite alternate; }
+  @keyframes rn-skeleton { from { opacity: 1; } to { opacity: .5; } }
 
   /* ---- ScrollArea / ResizeHandle ---- */
   .rn-scroll { overflow: auto; scrollbar-width: thin; scrollbar-color: var(--rn-fill-3) transparent; }
@@ -200,7 +208,7 @@
   .rn-scroll::-webkit-scrollbar-track { background: transparent; }
   .rn-resize { position: relative; flex: none; width: 8px; cursor: col-resize; touch-action: none; }
   .rn-resize[data-orientation='horizontal'] { width: auto; height: 8px; cursor: row-resize; }
-  .rn-resize::after { content: ''; position: absolute; top: 50%; left: 50%; width: 2px; height: 28px; margin: -14px 0 0 -1px; border-radius: 2px; background: var(--rn-hair-2); opacity: 0; transition: opacity var(--rn-d-1); }
+  .rn-resize::after { content: ''; position: absolute; top: 50%; left: 50%; width: 2px; height: 28px; margin: -14px 0 0 -1px; border-radius: 2px; background: var(--rn-hair-2); opacity: 0; transition: opacity var(--rn-d-1) var(--rn-ease-std); }
   .rn-resize[data-orientation='horizontal']::after { width: 28px; height: 2px; margin: -1px 0 0 -14px; }
   .rn-resize:hover::after, .rn-resize[data-dragging='true']::after { opacity: 1; }
 
@@ -254,8 +262,31 @@
   .rn-ref-preview__loading { height: 18px; border-radius: var(--rn-r-xs); background: var(--rn-fill); }
   .rn-ref-preview__hint { margin-top: 8px; font: 400 var(--rn-t-micro)/var(--rn-lh-micro) var(--rn-font-ui); color: var(--rn-ink-3); }
 
+  /* ---- Float motion (motion language M2): a float arrives from the side of its anchor; a closed float or toast leaves
+     as a fading copy (leave.ts). Under reduced motion the shift and pop tokens are 0 and 1, so both only dissolve. ---- */
+  /* The individual translate / scale properties compose with a float's own transform (e.g. a centring translate). */
+  [data-float-motion] { animation: rn-float-in var(--rn-d-2) var(--rn-ease-out) both; }
+  [data-float-motion='down'] { --rn-float-dy: calc(-1 * var(--rn-shift-1)); }
+  [data-float-motion='up'] { --rn-float-dy: var(--rn-shift-1); }
+  [data-float-motion='right'] { --rn-float-dx: calc(-1 * var(--rn-shift-1)); }
+  [data-float-motion='left'] { --rn-float-dx: var(--rn-shift-1); }
+  [data-float-motion='pop'] { --rn-float-scale: var(--rn-pop); }
+  /* fade: opacity only — no translate or scale at all, not even zero, which would make the frame the containing block of
+     fixed content inside it (a bare float such as the canvas slideshow) */
+  [data-float-motion='fade'] { animation-name: rn-fade-in; animation-duration: var(--rn-d-1); }
+  @keyframes rn-float-in { from { opacity: 0; translate: var(--rn-float-dx, 0) var(--rn-float-dy, 0); scale: var(--rn-float-scale, 1); } }
+  .rn-dialog-backdrop { animation: rn-fade-in var(--rn-d-2) var(--rn-ease-std) both; }
+  @keyframes rn-fade-in { from { opacity: 0; } }
+  /* A glyph that confirms a change (copied ✓, a step done) lands: it grows in from .7 on the spring (motion language M2). */
+  .rn-glyph-in { animation: rn-glyph-in var(--rn-d-2) var(--rn-ease-spring) both; }
+  @keyframes rn-glyph-in { from { opacity: 0; scale: .7; } }
+  [data-rn-leaving] { animation: rn-leave var(--rn-d-1) var(--rn-ease-std) forwards !important; pointer-events: none !important; }
+  [data-rn-leaving] * { animation: none !important; transition: none !important; }
+  @keyframes rn-leave { to { opacity: 0; } }
+
   @media (prefers-reduced-motion: reduce) {
-    .rn-skeleton, .rn-toast { animation: none; }
+    .rn-skeleton { animation: none; }
+    .rn-glyph-in { animation-name: rn-fade-in; }
     .rn-switch, .rn-switch::after, .rn-seg__item, .rn-btn, .rn-icon-btn, button.rn-chip, .rn-ref { transition: none; }
     :is(.rn-btn, .rn-icon-btn):active:not(:disabled) { transform: none; }
   }

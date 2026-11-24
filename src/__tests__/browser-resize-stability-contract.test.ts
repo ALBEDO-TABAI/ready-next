@@ -157,7 +157,11 @@ test('browser mode surface readiness uses captureStableFrame, mode switching use
   assert.match(tabRuntime, /view\.webContents\.setZoomFactor\(zoomFactor\)/)
   assert.doesNotMatch(tabRuntime, /root\.style\.zoom =/)
   assert.doesNotMatch(freezeHook, /captureViewportSnapshot/)
-  assert.doesNotMatch(freezeHook, /BROWSER_OVERLAY_LOCK_EVENT/)
+  // Motion language (2026-11-24): a float over the page asks for a fresh still before the view steps aside (never a stale
+  // cached frame), and the still goes once the view is back.
+  assert.match(freezeHook, /BROWSER_FREEZE_REQUEST_EVENT/)
+  assert.match(freezeHook, /inflight = captureSnapshot\(\)\.then\(async frame =>/)
+  assert.match(freezeHook, /if \(!resizingRef\.current && !maskHeldRef\.current\) \{/)
   assert.match(preload, /fitActiveTabToBounds:\s*\(tabId\?: string \| null\)\s*=>\s*ipcRenderer\.invoke\('browser:fitActiveTabToBounds', tabId\)/)
   assert.match(ipcShell, /ipcMain\.handle\('browser:fitActiveTabToBounds', async \(_, tabId\?: string \| null\) => \{/)
   assert.match(tabRuntime, /async fitActiveTabToBounds\(tabId\?: string \| null\): Promise<\{ success: boolean; zoomFactor\?: number; error\?: string \}>/)

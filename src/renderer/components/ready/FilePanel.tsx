@@ -173,7 +173,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
                   ? {
                       background: 'color-mix(in srgb, var(--rn-ok) 12%, transparent)',
                       boxShadow: 'inset 0 0 0 1px var(--rn-ok)',
-                      animation: 'pulse 1s ease-in-out 3',
+                      animation: 'pulse var(--rn-d-loop) var(--rn-ease-in-out) 2',
                     }
                   : {}),
               }}

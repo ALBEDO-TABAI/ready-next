@@ -26,6 +26,7 @@ import { addRSSReferenceToAgentInput } from '../../modules/agent/chat-input-brid
 import { useSelectionBar } from '../../modules/workbench/selection-bar/open-selection-bar'
 import type { CaptureSelection } from '../../modules/workbench/capture'
 import { askAboutSelection, receiveToCanvas, receiveToDocument, receiveToFastCard, reportCaptureError } from '../../modules/workbench/capture-receipt'
+import { scrollBehavior } from '../../design/next/motion'
 
 // Items re-extracted in this session; a page that still extracts badly is not fetched again on every open.
 const reextracted = new Set<string>()
@@ -193,7 +194,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
       <RSSTranslationControl state={translation} disabled={busy} />
       <span className="rss-topbar__divider" aria-hidden />
       <IconButton icon={<Star fill={item.starred ? 'currentColor' : 'none'} />} title={item.starred ? '取消收藏' : '收藏文章'} active={item.starred} onClick={() => onToggleStar(item.id)} />
-      <IconButton disabled={!content} icon={copied ? <Check /> : <Copy />} title={copied ? '已复制' : '复制标题、来源与正文'} aria-label={copied ? '已复制' : '复制内容'}
+      <IconButton disabled={!content} icon={copied ? <Check className="rn-glyph-in" /> : <Copy />} title={copied ? '已复制' : '复制标题、来源与正文'} aria-label={copied ? '已复制' : '复制内容'}
         onClick={() => { if (content) void copyTextToClipboard(`${title}\n来源：${article?.link || item.link}\n\n${content.text}`).then(setCopied) }} />
       <RSSSaveNoteButton article={content?.article || null} disabled={busy} active={active} onError={setError} />
       {onOpenOriginal && item.link && <>
@@ -204,7 +205,7 @@ export default function RSSArticleReader({ item, expectedRevision, reveal, onClo
     <div className="rss-reader-layout">
       {headings.length > 0 && <nav className="rss-reader-toc" aria-label="本文目录">
         <p>本文目录</p>
-        {headings.map((heading, index) => <button type="button" key={index} style={{ paddingLeft: `${Math.min(heading.level - 1, 3) * 12}px` }} onClick={() => rssReaderHeadings(bodyRef.current)[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{heading.title}</button>)}
+        {headings.map((heading, index) => <button type="button" key={index} style={{ paddingLeft: `${Math.min(heading.level - 1, 3) * 12}px` }} onClick={() => rssReaderHeadings(bodyRef.current)[index]?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' })}>{heading.title}</button>)}
       </nav>}
       <article className="rss-reader-content">
         <p className="rss-reader-source">

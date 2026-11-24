@@ -4,15 +4,14 @@ export const READY_WORKBENCH_MODE_CHANGE_EVENT = 'ready:workbench-mode-change-re
 
 export type WorkbenchModeChangePresentation = 'animated' | 'immediate'
 
-/** How long a mode change moves the content's scenes (and, in step, the sidebar's navigators, V23). The CSS animations
- *  that carry it (ritual-overlay.css, shell.css) use the same 280ms on cubic-bezier(0.24, 1, 0.36, 1). */
-export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 280
+/** How long a mode change moves the content's scenes (and, in step, the sidebar's navigators, V23): --rn-d-2, the
+ *  arrival time of the motion language (M2). The CSS transitions that carry it are in ritual-overlay.css and shell.css. */
+export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 200
 
-export function shouldAnimateWorkbenchModeTransition(
-  presentation: WorkbenchModeChangePresentation,
-  reducedMotion: boolean,
-): boolean {
-  return presentation === 'animated' && !reducedMotion
+/** Opening a file jumps straight to its mode; a mode change moves. Under reduced motion it still changes over time, as a
+ *  dissolve: the distance tokens are 0 there (motion language M5). */
+export function shouldAnimateWorkbenchModeTransition(presentation: WorkbenchModeChangePresentation): boolean {
+  return presentation === 'animated'
 }
 
 export interface WorkbenchModeChangeRequestDetail {

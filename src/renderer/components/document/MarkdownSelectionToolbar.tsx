@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Type,
 } from 'lucide-react'
+import { LeavingDiv } from '../ui/Leaving'
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -469,9 +470,11 @@ export default function MarkdownSelectionToolbar({
     setLinkUrl('')
   }
 
+  // It drops in under the selection and fades out in place when the selection goes (motion language M2).
   return createPortal(
-    <div
+    <LeavingDiv
       data-ready-md-toolbar=""
+      data-float-motion="down"
       data-ready-native-overlay=""
       role="toolbar"
       style={{
@@ -618,7 +621,7 @@ export default function MarkdownSelectionToolbar({
           />
         </div>
       )}
-    </div>,
+    </LeavingDiv>,
     document.body,
   )
 }

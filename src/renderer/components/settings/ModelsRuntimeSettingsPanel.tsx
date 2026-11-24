@@ -11,6 +11,7 @@ import {
   SettingsRow,
 } from '../../pages/settings/settings-shared'
 import { Button, IconButton, Input, Segmented } from '../ui'
+import { StableLabel } from '../ui/StableLabel'
 
 const SOURCE_LABELS: Record<ModelSource, string> = {
   auto: '自动',
@@ -297,7 +298,7 @@ export function RuntimeEnvironmentCard() {
                 onClick={() => void saveMirror()}
                 disabled={busy || mirrorSaving}
               >
-                {mirrorSaving ? '保存中…' : '保存'}
+                <StableLabel reserve={['保存', '正在保存…']}>{mirrorSaving ? '正在保存…' : '保存'}</StableLabel>
               </Button>
             </div>
             <div className="sx-meta" style={{ overflowWrap: 'anywhere' }}>

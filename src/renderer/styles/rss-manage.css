@@ -178,7 +178,7 @@
 }
 
 @keyframes rss-drawer-in {
-  from { opacity: 0; transform: translateX(12px); }
+  from { opacity: 0; transform: translateX(var(--rn-shift-2)); }
 }
 
 .rss-settings-header {

@@ -253,7 +253,7 @@ function AnalysisProgressRing({
           transform="rotate(-90 8 8)"
           strokeDasharray={circumference}
           strokeDashoffset={dash}
-          style={{ transition: 'stroke-dashoffset 240ms ease' }}
+          style={{ transition: 'stroke-dashoffset var(--rn-d-2) var(--rn-ease-out)' }}
         />
       </svg>
       {running && <Loader2 className="absolute h-[8px] w-[8px] animate-spin" style={{ color: 'var(--rn-accent)' }} />}

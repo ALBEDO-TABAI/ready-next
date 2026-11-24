@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLeaveAsGhost } from '../../../components/ui/leave'
 
 export interface MenuItem { id: string; label: string; detail?: string; run(): void | Promise<void> }
 export interface MenuAnchor { left: number; bottom: number }
@@ -10,6 +11,7 @@ export function CommandMenu({ label, anchor, items, close, query: controlled, on
   const [local, setLocal] = useState(initialQuery), [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null), list = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null)
   const closeRef = useRef(close); closeRef.current = close
+  useLeaveAsGhost(panel)
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (event.target instanceof Node && !panel.current?.contains(event.target)) closeRef.current() }
     document.addEventListener('pointerdown', outside)
@@ -20,7 +22,7 @@ export function CommandMenu({ label, anchor, items, close, query: controlled, on
   const index = Math.min(active, Math.max(0, filtered.length - 1))
   useEffect(() => { input.current?.focus() }, [])
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [index, filtered.length])
-  return createPortal(<div ref={panel} className="rn-ui rn-float ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label={label}
+  return createPortal(<div ref={panel} className="rn-ui rn-float ready-block-popover" data-float-motion="down" data-block-popup data-ready-native-overlay="" role="dialog" aria-label={label}
     style={{ left: Math.max(8, Math.min(anchor.left, window.innerWidth - 340)), top: Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - 340)) }}
     onKeyDown={event => {
       event.stopPropagation()
@@ -46,8 +48,9 @@ export function BlockEditorStyles() {
        A block with a handle keeps its gutter inside its own box; containers without one stop clipping their children's gutters. */
     .ready-block-shell[data-actionable] { padding-inline-start:28px; margin-inline-start:-28px; }
     .ready-block-shell:not([data-actionable]) { content-visibility:visible; contain-intrinsic-size:none; }
-    .ready-block-handle { position:absolute; left:2px; top:2px; width:23px; opacity:0; cursor:grab; color:var(--rn-ink-3); border:0; background:transparent; }
-    .ready-block-shell:hover > .ready-block-handle, .ready-block-shell:focus-within > .ready-block-handle { opacity:1; }
+    /* The handle shows in --rn-d-1 and lingers a beat before fading (motion language M2), so a pointer sweeping down the page does not flicker every handle it passes. */
+    .ready-block-handle { position:absolute; left:2px; top:2px; width:23px; opacity:0; cursor:grab; color:var(--rn-ink-3); border:0; background:transparent; transition:opacity var(--rn-d-2) var(--rn-ease-std) var(--rn-d-1); }
+    .ready-block-shell:hover > .ready-block-handle, .ready-block-shell:focus-within > .ready-block-handle { opacity:1; transition-duration:var(--rn-d-1); transition-delay:0s; }
     .ready-block-container { min-width:0; }
     .ready-block-container.is-indented { padding-left:24px; }
     .ready-block-container.is-quote { border-left:2px solid var(--rn-hair-2); }

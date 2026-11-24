@@ -120,7 +120,7 @@
 
   .rss-sieve__actions .rn-icon-btn {
     opacity: 0;
-    transition: opacity var(--rn-d-1) var(--rn-ease-std);
+    transition: opacity var(--rn-d-1) var(--rn-ease-std), transform var(--rn-d-release) var(--rn-ease-spring);
   }
 
   .rss-sieve__card:hover .rss-sieve__actions .rn-icon-btn,

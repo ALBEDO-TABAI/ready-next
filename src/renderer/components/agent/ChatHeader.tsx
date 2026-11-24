@@ -651,7 +651,7 @@ export default function ChatHeader({
               onClick={handleHistoryButtonClick}
               title={sessionTitle}
               aria-label={`当前会话：${sessionTitle}，点击查看历史对话`}
-              className="active:scale-[0.99] transition-transform duration-150"
+              className="active:scale-[0.99] transition-transform duration-(--rn-d-1)"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -672,7 +672,7 @@ export default function ChatHeader({
                   height: 12,
                   flexShrink: 0,
                   transform: showHistory ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 200ms ease',
+                  transition: 'transform var(--rn-d-2) var(--rn-ease-std)',
                   color: 'var(--rn-ink)',
                 }}
               />
@@ -878,7 +878,7 @@ export default function ChatHeader({
                               width: 14,
                               height: 14,
                               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                              transition: 'transform 160ms ease',
+                              transition: 'transform var(--rn-d-2) var(--rn-ease-std)',
                             }}
                             strokeWidth={2}
                           />

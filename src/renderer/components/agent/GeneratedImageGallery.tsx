@@ -93,7 +93,7 @@ export function GeneratedImageGallery({ images, onPreview, onReferenceSelect }: 
                 announceGeneratedImageDragState(false)
                 endGeneratedImageDrag()
               }}
-              className="group/generated-image overflow-hidden border-0 text-left transition-transform duration-150 active:scale-[0.99]"
+              className="group/generated-image overflow-hidden border-0 text-left transition-transform duration-(--rn-d-1) active:scale-[0.99]"
               style={{
                 width: cards.length === 1 ? 'min(100%, 420px)' : 'min(48%, 260px)',
                 minWidth: 168,

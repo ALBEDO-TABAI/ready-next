@@ -29,7 +29,7 @@ body {
    so the per-selector transition whitelist has been removed. A minimal body-level
    safety is kept for reduce-motion users who bypass the overlay. */
 body {
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
 }
 
 /* Type roles (W1 DL7): Inter + PingFang at the --rn-fs-* scale; Geist Mono for labels and numbers. */
@@ -150,7 +150,7 @@ body {
 }
 
 .dot-glyph--pulse i.on {
-  animation: dot-glyph-pulse 1.4s ease-in-out infinite;
+  animation: dot-glyph-pulse var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 @keyframes dot-glyph-pulse {
@@ -287,7 +287,7 @@ html[data-native-fullscreen='true'][data-transparency='normal']:root {
   z-index: 0;
   pointer-events: none;
   opacity: var(--app-bg-overlay-opacity, 0);
-  transition: opacity 260ms ease;
+  transition: opacity var(--rn-d-3) var(--rn-ease-std);
 }
 
 .ready-app-bg::before,

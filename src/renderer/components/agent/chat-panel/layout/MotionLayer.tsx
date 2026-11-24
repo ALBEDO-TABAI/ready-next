@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion, useIsPresent, useReducedMotion } from 'framer-motion'
+import { EASE, MOTION_MS } from '../../../../design/next/motion'
 import { PanelLeftClose, History, Plus } from 'lucide-react'
 import {
   WORKBENCH_EDGE_RAIL_SIZE,
@@ -63,7 +64,7 @@ export function ChatPanelMotionLayer({
 
   return (
     <motion.div
-      className="absolute inset-0 overflow-hidden"
+      className="chat-panel-motion-layer absolute inset-0 overflow-hidden"
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
@@ -83,9 +84,9 @@ export function ChatPanelMotionLayer({
         reduceMotion
           ? { opacity: 0, transition: { duration: WORKBENCH_PANEL_REDUCED_MOTION_DURATION_S } }
           : {
-              x: WORKBENCH_PANEL_MOTION_OFFSET_PX,
+              // Leaving is quicker than arriving and does not travel (motion language M2).
               opacity: 0.01,
-              transition: { duration: WORKBENCH_PANEL_MOTION_DURATION_S, ease: WORKBENCH_PANEL_MOTION_EASE }
+              transition: { duration: MOTION_MS.d1 / 1000, ease: EASE.std }
             }
       }
     >

@@ -255,52 +255,44 @@ html[data-theme-ritual-direction='to-light'][data-theme-ritual-phase='leaving'] 
   transform: translate3d(0, 0, 0);
   opacity: 1;
   will-change: transform, opacity;
+  /* A mode change (motion language M2–M3) moves along the rail's axis, as the sidebar's navigators do: going down the
+     rail the new scene rises from below on the arrival curve and the old one drifts up as it fades, faster. Transitions,
+     not keyframes: a change made mid-way turns a scene around from where it is (scene-motion.ts keeps each leaving
+     scene until its own fade is over). */
+  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out);
 }
 
 .workbench-mode-scene[data-mode-visual-state='hidden'] {
   display: none;
 }
 
-.workbench-mode-scene[data-mode-visual-state='entering'][data-mode-direction='forward'] {
-  animation: workbench-mode-scene-enter-from-right 280ms cubic-bezier(0.24, 1, 0.36, 1) both;
+/* A loading mode's note shows only after a beat (WorkbenchModeOutlet ModeFallback). */
+.workbench-mode-fallback {
+  animation: rn-fade-in var(--rn-d-2) var(--rn-ease-std) calc(var(--rn-d-3) - 20ms) both;
 }
 
-.workbench-mode-scene[data-mode-visual-state='entering'][data-mode-direction='backward'] {
-  animation: workbench-mode-scene-enter-from-left 280ms cubic-bezier(0.24, 1, 0.36, 1) both;
+@starting-style {
+  .workbench-mode-scene[data-mode-visual-state='entering'][data-mode-direction='forward'] { transform: translate3d(0, var(--rn-shift-3), 0); opacity: 0; }
+  .workbench-mode-scene[data-mode-visual-state='entering'][data-mode-direction='backward'] { transform: translate3d(0, calc(-1 * var(--rn-shift-3)), 0); opacity: 0; }
+}
+
+.workbench-mode-scene[data-mode-visual-state='leaving'] {
+  opacity: 0;
+  transition-duration: var(--rn-d-1);
+  transition-timing-function: var(--rn-ease-std);
 }
 
 .workbench-mode-scene[data-mode-visual-state='leaving'][data-mode-direction='forward'] {
-  animation: workbench-mode-scene-leave-to-left 280ms cubic-bezier(0.24, 1, 0.36, 1) forwards;
+  transform: translate3d(0, calc(-.5 * var(--rn-shift-3)), 0);
 }
 
 .workbench-mode-scene[data-mode-visual-state='leaving'][data-mode-direction='backward'] {
-  animation: workbench-mode-scene-leave-to-right 280ms cubic-bezier(0.24, 1, 0.36, 1) forwards;
-}
-
-@keyframes workbench-mode-scene-enter-from-right {
-  from { transform: translate3d(28%, 0, 0); opacity: 0; }
-  to { transform: translate3d(0, 0, 0); opacity: 1; }
-}
-
-@keyframes workbench-mode-scene-enter-from-left {
-  from { transform: translate3d(-28%, 0, 0); opacity: 0; }
-  to { transform: translate3d(0, 0, 0); opacity: 1; }
-}
-
-@keyframes workbench-mode-scene-leave-to-left {
-  from { transform: translate3d(0, 0, 0); opacity: 1; }
-  to { transform: translate3d(-28%, 0, 0); opacity: 0; }
-}
-
-@keyframes workbench-mode-scene-leave-to-right {
-  from { transform: translate3d(0, 0, 0); opacity: 1; }
-  to { transform: translate3d(28%, 0, 0); opacity: 0; }
+  transform: translate3d(0, calc(.5 * var(--rn-shift-3)), 0);
 }
 
 @media (prefers-reduced-motion: reduce) {
   [data-ritual-overlay],
-  .ritual-theme-choreography [data-glyph],
-  .workbench-mode-scene {
+  .ritual-theme-choreography [data-glyph] {
     transition: none !important;
     animation: none !important;
   }

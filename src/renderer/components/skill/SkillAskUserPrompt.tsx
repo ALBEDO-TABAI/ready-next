@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { Button, Textarea } from '../ui'
+import { scrollBehavior } from '../../design/next/motion'
 
 interface AskUserEvent {
   executionId: string
@@ -105,7 +106,7 @@ export function SkillAskUserPrompt(): ReactElement | null {
         || anchor.parentElement
         || anchor
       if (typeof scrollRoot.scrollTo === 'function') {
-        scrollRoot.scrollTo({ top: scrollRoot.scrollHeight, behavior: 'smooth' })
+        scrollRoot.scrollTo({ top: scrollRoot.scrollHeight, behavior: scrollBehavior() })
       } else {
         scrollRoot.scrollTop = scrollRoot.scrollHeight
       }

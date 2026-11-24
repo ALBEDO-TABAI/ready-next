@@ -1,10 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { closeAllFloats, closeFloat, floatAncestors, getFloats, subscribeFloats, type FloatEntry } from './float-store'
+import { leaveAsGhost } from '../leave'
 
 // The one float implementation of Ready Next (W1 §4–§5, DL4): FloatHost renders the stack kept in
 // float-store.ts (openFloat, closeFloat, …). Every frame carries data-ready-native-overlay, so the
 // native web view steps aside while a float covers it and comes back when it closes.
+// Motion (motion language M2): a frame arrives from the side of its anchor (data-float-motion, primitives.css) and,
+// once closed, leaves as a fading copy (leave.ts).
+
+/** Which way a placed frame arrives: from its anchor towards where it opened. */
+export type FloatMotion = 'down' | 'up' | 'right' | 'left' | 'pop' | 'fade'
 
 /** Mounted once for the whole app. */
 export function FloatHost() {
@@ -36,6 +42,15 @@ export function FloatHost() {
   return createPortal(<>{entries.map((entry, index) => <FloatFrame key={entry.id} entry={entry} z={2000 + index * 2} />)}</>, document.body)
 }
 
+function motionOf(entry: FloatEntry, anchor: { top: number; bottom: number; left: number; right: number }, pos: { left: number; top: number }): FloatMotion {
+  // A bare float brings its own surface and may place fixed content by the viewport (the canvas slideshow): a transform
+  // on the frame would become their containing block, so it only fades.
+  if (entry.role === 'tooltip' || entry.bare) return 'fade'
+  if (entry.placement === 'center') return 'pop'
+  if (entry.placement === 'right-start' || entry.placement === 'left-start') return pos.left >= anchor.right ? 'right' : 'left'
+  return pos.top >= anchor.bottom ? 'down' : 'up'
+}
+
 function place(entry: FloatEntry, element: HTMLElement) {
   const anchor = typeof entry.anchor === 'function' ? entry.anchor() : entry.anchor
   const width = element.offsetWidth
@@ -63,10 +78,19 @@ function place(entry: FloatEntry, element: HTMLElement) {
 
 function FloatFrame({ entry, z }: { entry: FloatEntry; z: number }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const backdrop = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; motion: FloatMotion } | null>(null)
   useLayoutEffect(() => {
     const element = ref.current!
-    const update = () => setPos(place(entry, element))
+    const update = () => {
+      const at = place(entry, element)
+      const anchor = typeof entry.anchor === 'function' ? entry.anchor() : entry.anchor
+      setPos(previous => {
+        // The way it arrived stays put when the frame is placed again (a resize, new content).
+        const motion = previous?.motion ?? motionOf(entry, anchor, at)
+        return previous && previous.left === at.left && previous.top === at.top && previous.motion === motion ? previous : { ...at, motion }
+      })
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(element)
@@ -80,12 +104,19 @@ function FloatFrame({ entry, z }: { entry: FloatEntry; z: number }) {
     const element = ref.current!
     ;(element.querySelector<HTMLElement>('[data-autofocus]') ?? element).focus({ preventScroll: true })
   }, [entry, pos])
+  // Closed: the frame (and its dimmed page) fade out as copies while the real ones are already gone.
+  useLayoutEffect(() => {
+    const element = ref.current
+    const dim = backdrop.current
+    return () => { leaveAsGhost(dim); leaveAsGhost(element) }
+  }, [])
   const close = () => closeFloat(entry.id)
   return <>
-    {entry.modal && <div className="rn-dialog-backdrop" data-ready-native-overlay="float-backdrop" style={{ zIndex: z }} onPointerDown={close} />}
+    {entry.modal && <div ref={backdrop} className="rn-dialog-backdrop" data-ready-native-overlay="float-backdrop" style={{ zIndex: z }} onPointerDown={close} />}
     <div
       ref={ref}
       data-float-id={entry.id}
+      data-float-motion={pos?.motion}
       data-ready-native-overlay="float"
       role={entry.role}
       aria-label={entry.label}

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ContextUsageSnapshot } from '../../../../shared/context-usage-types'
+import { LeavingDiv } from '../../ui/Leaving'
 
 export interface ContextUsageMeterModel {
   ariaLabel: string
@@ -115,8 +116,9 @@ export function ContextUsageMeter({
   const hideTooltip = useCallback(() => setTooltipPosition(null), [])
   const tooltip = tooltipPosition && typeof document !== 'undefined'
     ? createPortal(
-      <div
+      <LeavingDiv
         data-ready-native-overlay=""
+        data-float-motion="fade"
         data-agent-context-usage-tooltip="true"
         role="tooltip"
         className="rn-float"
@@ -154,7 +156,7 @@ export function ContextUsageMeter({
             {line}
           </div>
         ))}
-      </div>,
+      </LeavingDiv>,
       document.body,
     )
     : null
@@ -178,7 +180,7 @@ export function ContextUsageMeter({
           justifyContent: 'center',
           flexShrink: 0,
           opacity: model.dimmed ? 0.58 : 1,
-          transition: 'opacity 160ms ease, background-color 160ms ease',
+          transition: 'opacity var(--rn-d-1) var(--rn-ease-std), background-color var(--rn-d-1) var(--rn-ease-std)',
         }}
       >
         <svg
@@ -206,6 +208,8 @@ export function ContextUsageMeter({
             strokeLinecap="round"
             strokeDasharray={dash}
             transform="rotate(-90 9 9)"
+            // The arc grows and changes colour as the context fills, never jumps (motion language M2).
+            style={{ transition: 'stroke-dasharray var(--rn-d-3) var(--rn-ease-std), stroke var(--rn-d-3) var(--rn-ease-std)' }}
           />
         </svg>
       </div>

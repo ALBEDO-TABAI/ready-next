@@ -236,7 +236,7 @@ export function AgentBrowserSupervisionPanel({
                 </button>
                 {/* progress bar */}
                 <div className="mx-2.5 mb-1 h-[3px] overflow-hidden rounded-full" style={{ background: 'var(--rn-fill-2)' }}>
-                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: 'var(--rn-ink-3)' }} />
+                  <div className="h-full rounded-full transition-[width] duration-(--rn-d-3)" style={{ width: `${pct}%`, background: 'var(--rn-ink-3)' }} />
                 </div>
                 {open && (
                   <div className="px-2.5 pb-2 pt-0.5 text-[11px]" style={{ color: 'var(--rn-ink-3)' }}>

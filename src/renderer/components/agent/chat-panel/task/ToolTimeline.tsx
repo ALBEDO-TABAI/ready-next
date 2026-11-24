@@ -39,7 +39,7 @@ export function CapsuleChevron({ expanded }: { expanded: boolean }) {
         height: 12,
         color: 'var(--rn-ink-3)',
         transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-        transition: 'transform 160ms ease',
+        transition: 'transform var(--rn-d-2) var(--rn-ease-std)',
         flexShrink: 0,
       }}
       strokeWidth={2}

@@ -58,23 +58,34 @@
   overflow: hidden;
 }
 
-/* 180ms is WORKBENCH_PANEL_MOTION_DURATION_MS (modules/workbench/panel-motion.ts): the web view's bounds follow it. The
-   content column's gap beside a docked panel closes with it (V18, V25), and the assistant's strip opens as the
-   assistant closes (V17). */
+/* A panel opening or closing (motion language M2, M4): --rn-d-2 is WORKBENCH_PANEL_MOTION_DURATION_MS
+   (modules/workbench/panel-motion.ts), the same both ways because ⌘B and the assistant switch are pressed often and a
+   change made mid-way turns the columns around. These are widths (the content column has to reflow; allowlisted in
+   check-motion-allowlist.json); dragging a divider (body.resizing) and an instant change switch the transition off. The
+   web view's bounds follow the columns. The content column's gap beside a docked panel closes with it (V18, V25), and
+   the assistant's strip opens as the assistant closes (V17). */
 .shell-assistant-strip,
 [data-shell-region='content'],
 [data-liquid-shell='side-panel'],
 [data-liquid-shell='chat-panel'] {
   transition:
-    width 180ms var(--rn-ease-out),
-    min-width 180ms var(--rn-ease-out),
-    margin 180ms var(--rn-ease-out);
+    width var(--rn-d-2) var(--rn-ease-out),
+    min-width var(--rn-d-2) var(--rn-ease-out),
+    margin var(--rn-d-2) var(--rn-ease-out);
+}
+
+/* The assistant's content keeps its open width while its column opens or closes (--shell-open-w, set with the width in
+   WorkbenchMode.tsx): it slides in and out with the panel's edge, clipped by the column, instead of laying out the
+   transcript and rebuilding the composer's glass on every frame (motion language M4). At rest the two widths agree. */
+[data-liquid-shell='chat-panel'] > .chat-panel-motion-layer {
+  right: auto;
+  width: var(--shell-open-w, 100%);
 }
 
 /* A collapsed sidebar's panel goes out of reach once its column has closed (its shadow would stay as a sliver). */
 [data-liquid-shell='side-panel'][data-collapsed='true'] > .shell-sidebar__slot {
   visibility: hidden;
-  transition: visibility 0s linear 180ms;
+  transition: visibility 0s linear var(--rn-d-2);
 }
 
 [data-panel-width-transition='instant'] .shell-assistant-strip,
@@ -92,16 +103,17 @@ body.resizing [data-liquid-shell='chat-panel'] {
   transition: none;
 }
 
+/* Reduced motion: the columns take their new widths at once (M5). */
 @media (prefers-reduced-motion: reduce) {
   [data-liquid-shell='side-panel'],
   [data-liquid-shell='chat-panel'],
   .shell-assistant-strip,
   [data-shell-region='content'] {
-    transition-duration: 80ms;
+    transition-duration: 0s;
   }
 
   [data-liquid-shell='side-panel'][data-collapsed='true'] > .shell-sidebar__slot {
-    transition-delay: 80ms;
+    transition-delay: 0s;
   }
 }
 

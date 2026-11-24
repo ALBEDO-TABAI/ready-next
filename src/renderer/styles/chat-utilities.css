@@ -92,7 +92,7 @@
   line-height: 1.4;
   font-weight: 500;
   letter-spacing: 0;
-  animation: ready-thinking-sweep 1.8s ease-in-out infinite;
+  animation: ready-thinking-sweep var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 .ready-thinking-state-trail {
@@ -100,7 +100,7 @@
   color: var(--rn-ink-3);
   font-family: var(--rn-font-mono);
   letter-spacing: 1px;
-  animation: ready-thinking-trail 1.3s steps(3, end) infinite;
+  animation: ready-thinking-trail var(--rn-d-loop) steps(3, end) infinite;
 }
 
 .ready-thinking-reasoning {
@@ -125,11 +125,11 @@
 }
 
 .ready-thinking-reasoning[data-ready-thinking-reasoning='running'] {
-  animation: ready-reasoning-breathe 1.8s ease-in-out infinite;
+  animation: ready-reasoning-breathe var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 .ready-task-todo-row {
-  animation: ready-task-row-enter 180ms ease-out both;
+  animation: ready-task-row-enter var(--rn-d-2) var(--rn-ease-out) both;
 }
 
 .ready-task-todo-label {
@@ -137,8 +137,8 @@
   text-decoration-color: transparent;
   text-decoration-thickness: 0.5px;
   transition:
-    color var(--rn-d-2) ease,
-    text-decoration-color var(--rn-d-2) ease;
+    color var(--rn-d-2) var(--rn-ease-std),
+    text-decoration-color var(--rn-d-2) var(--rn-ease-std);
 }
 
 [data-ready-tool-timeline-item='running'] .ready-task-todo-label,
@@ -155,8 +155,11 @@
   background-position: 145% 0;
   background-size: 240% 100%;
   background-clip: text;
-  color: transparent;
-  animation: ready-task-label-sweep 1.9s ease-in-out infinite;
+  /* The sweep paints the glyphs through a transparent fill, not a transparent colour: when the step is done the fill
+     comes back at once and only the colour moves (ink-2 → ink-3), so a finished row never blinks out and back. */
+  color: var(--rn-ink-2);
+  -webkit-text-fill-color: transparent;
+  animation: ready-task-label-sweep var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 [data-ready-tool-timeline-item='done'] .ready-task-todo-label,
@@ -209,7 +212,7 @@
 /* Running is the assistant's "now" (W1 DL5). */
 .ready-task-step-glyph[data-ready-task-step-status='running'] {
   color: var(--rn-accent);
-  animation: ready-task-step-breathe 1.6s ease-in-out infinite;
+  animation: ready-task-step-breathe var(--rn-d-loop) var(--rn-ease-in-out) infinite;
 }
 
 .ready-task-step-glyph[data-ready-task-step-status='blocked'] {
@@ -253,7 +256,7 @@
   mask-repeat: no-repeat;
   mask-position: -14px -4px;
   mask-size: 70% 90%;
-  animation: ready-image-focus-move 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+  animation: ready-image-focus-move calc(var(--rn-d-loop) * 1.6) var(--rn-ease-in-out) infinite alternate;
 }
 
 [data-ready-tool-detail-code] {
@@ -327,7 +330,7 @@
 @keyframes ready-task-row-enter {
   from {
     opacity: 0;
-    transform: translateY(2px);
+    transform: translateY(var(--rn-shift-1));
   }
 
   to {

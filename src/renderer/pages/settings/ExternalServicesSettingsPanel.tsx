@@ -3,6 +3,7 @@ import { ArrowUpRight, Check, Info, Loader2, XCircle } from 'lucide-react'
 import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../../shared/external-services'
 import { Button, Checkbox, Input, Select, Switch } from '../../components/ui'
 import { SettingsCard, SettingsNotice, SettingsSwitchLabel } from './settings-shared'
+import { StableLabel } from '../../components/ui/StableLabel'
 
 const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
   apiKey: 'API Key',
@@ -310,7 +311,7 @@ export function ExternalServicesSettingsPanel() {
   const saveProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.updateExternalService) return
     setBusyId(profile.id)
-    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在保存配置...' })
+    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在保存配置…' })
     try {
       const res = await window.electronAPI.settings.updateExternalService(buildExternalServicePayload(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || []))
       if (res.success && res.data) {
@@ -331,7 +332,7 @@ export function ExternalServicesSettingsPanel() {
   const resetProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.resetExternalService) return
     setBusyId(profile.id)
-    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在重置配置...' })
+    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在重置配置…' })
     try {
       const res = await window.electronAPI.settings.resetExternalService({ id: profile.id })
       if (res.success && res.data) {
@@ -355,7 +356,7 @@ export function ExternalServicesSettingsPanel() {
     setFeedback({
       kind: 'info',
       serviceId: profile.id,
-      text: profile.kind === 'image-generation' ? '正在试生成一张测试图，完成后会立即丢弃...' : '正在测试当前表单配置...',
+      text: profile.kind === 'image-generation' ? '正在试生成一张测试图，完成后会立即丢弃…' : '正在测试当前表单配置…',
     })
     try {
       const res = await window.electronAPI.settings.testExternalServiceDraft(buildExternalServicePayload(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || []))
@@ -438,7 +439,7 @@ export function ExternalServicesSettingsPanel() {
                     type="button"
                     onClick={() => setSelectedId(profile.id)}
                     aria-current={active ? 'true' : undefined}
-                    className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-3 text-left transition-[background-color,box-shadow] duration-150 ${active
+                    className={`flex w-full items-center gap-3 rounded-[12px] px-3.5 py-3 text-left transition-[background-color,box-shadow] duration-(--rn-d-1) ${active
                       ? 'bg-[var(--rn-fill-2)]'
                       : 'hover:bg-[var(--rn-fill)]'}`}
                   >
@@ -708,7 +709,7 @@ export function ExternalServicesSettingsPanel() {
                   ? (isSelectedTesting ? '校验中' : '仅校验字段')
                   : isSelectedImageGeneration
                     ? (isSelectedTesting ? '生成中' : '试生成')
-                    : (isSelectedTesting ? '测试中' : '测试')}
+                    : <StableLabel reserve={['测试', '正在测试…']}>{isSelectedTesting ? '正在测试…' : '测试'}</StableLabel>}
               </Button>
               <Button
                 variant="primary"
@@ -718,7 +719,7 @@ export function ExternalServicesSettingsPanel() {
                 style={{ minWidth: 72 }}
                 icon={isSelectedBusy ? <Loader2 className="animate-spin" /> : undefined}
               >
-                {isSelectedBusy ? '保存中' : '保存'}
+                <StableLabel reserve={['保存', '正在保存…']}>{isSelectedBusy ? '正在保存…' : '保存'}</StableLabel>
               </Button>
             </div>
           </div>

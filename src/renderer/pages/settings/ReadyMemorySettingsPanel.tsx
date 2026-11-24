@@ -23,6 +23,7 @@ import {
   SettingsNotice,
   SettingsRow,
 } from './settings-shared'
+import { StableLabel } from '../../components/ui/StableLabel'
 
 const CATEGORY_OPTIONS: Array<{ value: ReadyMemoryCategory; label: string }> = [
   { value: 'preference', label: '偏好' },
@@ -381,7 +382,7 @@ export function ReadyMemorySettingsPanel() {
                 disabled={operationBusy || content.trim().length === 0}
                 aria-busy={busy === 'save-entry' ? true : undefined}
               >
-                {busy === 'save-entry' ? '保存中…' : editingEntryId ? '保存修改' : '添加记忆'}
+                <StableLabel reserve={['正在保存…', '保存修改', '添加记忆']}>{busy === 'save-entry' ? '正在保存…' : editingEntryId ? '保存修改' : '添加记忆'}</StableLabel>
               </Button>
             </div>
           </div>

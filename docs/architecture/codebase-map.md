@@ -14,6 +14,7 @@ Renderer (React / Zustand)
 
 - 主进程微入口：`src/main/boot-entry.ts`（构建为 `out/main/index.js`，先显示启动动画）
 - 启动动画：窗口 `src/main/startup-splash-window.ts`，页面 `src/shared/startup-splash-markup.ts`（液态玻璃上的点构成 Instrument Serif 字标；预览 `#/startup-preview`，检查 `npm run verify:ready-next-splash`）；macOS 26+ 的系统液态玻璃与玻璃下的水波是原生层 `native/startup-glass/`（`scripts/build-startup-glass.cjs` 编译，`src/main/startup-glass.ts` 加载，失败时页面自画玻璃）
+- 动效语言：令牌在 `src/renderer/design/next/tokens.css`（`--rn-d-*`、`--rn-ease-*`、`--rn-shift-*`），脚本侧镜像 `src/renderer/design/next/motion.ts`；浮层与提示条的离开副本 `src/renderer/components/ui/leave.ts`，模式场景与侧栏导航的切换 `src/renderer/modules/workbench/scene-motion.ts`；门禁 `scripts/check-motion.cjs`（`npm run verify:design-tokens`），合同 `docs/superpowers/plans/2026-11-24-ready-next-motion-language-implementation.md`
 - 主进程应用宿主：`src/main/index.ts`（由微入口分片预热后动态加载）
 - Preload 入口：`src/preload/index.ts`
 - Renderer 启动：`src/renderer/main.tsx`

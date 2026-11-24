@@ -36,8 +36,9 @@ test('workbench outlet keeps all modes mounted and routes mode switching through
   assert.match(outlet, /isActive=\{modeKey === runtime\.current && !suspended\}/)
   assert.match(outlet, /isSuspended=\{suspended\}/)
   assert.match(outlet, /isMotionSettled=\{isActive \? isMotionSettled : false\}/)
-  assert.match(outlet, /const MODE_SCENE_TRANSITION_MS = WORKBENCH_MODE_SCENE_TRANSITION_MS/)
-  assert.match(modeTransition, /export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 280/)
+  // Motion language (2026-11-24): scene timing lives in scene-motion.ts (--rn-d-2 plus slack), shared with the navigators.
+  assert.match(outlet, /useSceneMotion\(mode,/)
+  assert.match(modeTransition, /export const WORKBENCH_MODE_SCENE_TRANSITION_MS = 200/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_FADE_OPACITY/)
   assert.doesNotMatch(outlet, /resolveModeDirection/)

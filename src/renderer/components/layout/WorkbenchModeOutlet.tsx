@@ -1,11 +1,8 @@
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useEffect } from 'react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
-import {
-  shouldAnimateWorkbenchModeTransition,
-  WORKBENCH_MODE_SCENE_TRANSITION_MS,
-  type WorkbenchModeChangePresentation,
-} from '../../modules/workbench/mode-transition'
+import { shouldAnimateWorkbenchModeTransition, type WorkbenchModeChangePresentation } from '../../modules/workbench/mode-transition'
+import { useSceneMotion, type SceneDirection, type SceneMotion } from '../../modules/workbench/scene-motion'
 import { useNativeSurfaceAwareOverlay } from '../../modules/overlay/useNativeSurfaceAwareOverlay'
 
 type ModeComponentProps = {
@@ -18,7 +15,7 @@ type ModeComponentProps = {
 }
 
 type ModeVisualState = 'current' | 'entering' | 'leaving' | 'hidden'
-type ModeDirection = 'forward' | 'backward'
+type ModeDirection = SceneDirection
 
 interface ModeSceneProps {
   modeKey: WorkbenchMode
@@ -49,7 +46,6 @@ const MODE_COMPONENTS: Record<WorkbenchMode, React.ComponentType<ModeComponentPr
 
 const ALL_WORKBENCH_MODES: WorkbenchMode[] = ['browser', 'document', 'rss', 'calendar']
 const ALL_MODE_LOADERS = [loadBrowserMode, loadDocumentMode, loadRSSMode, loadCalendarMode]
-const MODE_SCENE_TRANSITION_MS = WORKBENCH_MODE_SCENE_TRANSITION_MS
 let hasPreloadedWorkbenchModes = false
 
 type IdleCallbackHandle = ReturnType<Window['setTimeout']>
@@ -59,20 +55,13 @@ type IdleSchedulerWindow = Window & {
   cancelIdleCallback?: (handle: IdleCallbackHandle) => void
 }
 
-function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
-}
-
+// A mode that is still loading says so only if it takes a while: nothing for a beat, then a quiet fade in (motion
+// language M2), so a quick first switch never flashes a word mid-slide.
 function ModeFallback() {
   return (
     <div className="flex h-full items-center justify-center" style={{ background: 'transparent' }}>
-      <span style={{ color: 'var(--rn-ink-2)', fontSize: 13 }}>
-        加载中...
+      <span className="workbench-mode-fallback" style={{ color: 'var(--rn-ink-3)', fontSize: 13 }}>
+        正在加载…
       </span>
     </div>
   )
@@ -113,6 +102,8 @@ const ModeScene = memo(function ModeScene({
       data-mode-visual-state={visualState}
       data-mode-direction={direction}
       aria-hidden={!isActive || suspended}
+      // A scene on its way out is seen for a moment but takes no focus or keys.
+      inert={visualState === 'leaving' || undefined}
     >
       <Suspense fallback={<ModeFallback />}>
         <ModeComponent
@@ -128,20 +119,9 @@ const ModeScene = memo(function ModeScene({
   )
 }, areModeScenePropsEqual)
 
-interface SceneRuntime {
-  current: WorkbenchMode
-  previous: WorkbenchMode | null
-  direction: ModeDirection
-}
-
-function resolveVisualState(
-  modeKey: WorkbenchMode,
-  runtime: SceneRuntime,
-): ModeVisualState {
-  if (modeKey === runtime.current) {
-    return runtime.previous ? 'entering' : 'current'
-  }
-  if (modeKey === runtime.previous) return 'leaving'
+function resolveVisualState(modeKey: WorkbenchMode, motion: SceneMotion<WorkbenchMode>): ModeVisualState {
+  if (modeKey === motion.current) return motion.entering ? 'entering' : 'current'
+  if (motion.leaving[modeKey]) return 'leaving'
   return 'hidden'
 }
 
@@ -161,12 +141,9 @@ export default function WorkbenchModeOutlet({
   suspended?: boolean
 }) {
   useNativeSurfaceAwareOverlay()
-  const previousModeRef = useRef<WorkbenchMode>(mode)
-  const [runtime, setRuntime] = useState<SceneRuntime>({
-    current: mode,
-    previous: null,
-    direction: 'forward',
-  })
+  // A change slides the new scene in from its side of the rail and the old one out the other way (motion language M2,
+  // ritual-overlay.css); under reduced motion the shift token is 0 and the two only dissolve.
+  const runtime = useSceneMotion(mode, { animate: shouldAnimateWorkbenchModeTransition(transitionPresentation), order: ALL_WORKBENCH_MODES })
 
   useEffect(() => {
     if (hasPreloadedWorkbenchModes) return
@@ -196,35 +173,12 @@ export default function WorkbenchModeOutlet({
     }
   }, [])
 
-  useLayoutEffect(() => {
-    if (mode === previousModeRef.current) return
-    const previousMode = previousModeRef.current
-    previousModeRef.current = mode
-    const prevIdx = ALL_WORKBENCH_MODES.indexOf(previousMode)
-    const nextIdx = ALL_WORKBENCH_MODES.indexOf(mode)
-    const direction: ModeDirection = nextIdx >= prevIdx ? 'forward' : 'backward'
-
-    if (!shouldAnimateWorkbenchModeTransition(transitionPresentation, prefersReducedMotion())) {
-      setRuntime({ current: mode, previous: null, direction })
-      return
-    }
-
-    setRuntime({ current: mode, previous: previousMode, direction })
-    const timer = window.setTimeout(() => {
-      setRuntime((prev) => (prev.current === mode ? { ...prev, previous: null } : prev))
-    }, MODE_SCENE_TRANSITION_MS + 40)
-
-    return () => {
-      window.clearTimeout(timer)
-    }
-  }, [mode, transitionPresentation])
-
   // The scenes' container clips only while a scene slides in or out (V22, flat-chrome.css): otherwise the panel's
   // shadow reaches past it.
   return (
     <div
       className="workbench-mode-outlet"
-      data-mode-transition={runtime.previous ? 'true' : undefined}
+      data-mode-transition={runtime.entering || Object.keys(runtime.leaving).length ? 'true' : undefined}
       style={{
         background: 'transparent',
       }}
@@ -239,7 +193,7 @@ export default function WorkbenchModeOutlet({
             isMotionSettled={isMotionSettled}
             browserLayoutPhase={browserLayoutPhase}
             visualState={visualState}
-            direction={runtime.direction}
+            direction={runtime.leaving[modeKey] ?? runtime.direction}
             suspended={suspended}
           />
         )

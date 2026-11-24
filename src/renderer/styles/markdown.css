@@ -156,7 +156,7 @@
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
-  transition: transform 150ms ease, filter 150ms ease;
+  transition: transform var(--rn-d-1) var(--rn-ease-std), filter var(--rn-d-1) var(--rn-ease-std);
 }
 
 .note-preview-chip:hover {
@@ -599,7 +599,7 @@
   text-decoration-line: underline;
   text-decoration-thickness: 0.5px;
   text-underline-offset: 3px;
-  transition: color var(--rn-d-1) ease, text-decoration-color var(--rn-d-1) ease;
+  transition: color var(--rn-d-1) var(--rn-ease-std), text-decoration-color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .ready-agent-link:not(.ready-agent-citation)::after {
@@ -736,11 +736,11 @@
   border-radius: 1px;
   background: var(--rn-accent);
   vertical-align: -0.12em;
-  animation: ready-stream-caret-blink 0.9s steps(1, end) infinite;
+  animation: ready-stream-caret-blink var(--rn-d-spin) steps(1, end) infinite;
 }
 
 .ready-agent-prose[data-ready-streaming='true'] {
-  animation: ready-stream-text-enter 140ms ease-out;
+  animation: ready-stream-text-enter var(--rn-d-1) var(--rn-ease-out);
 }
 
 @keyframes ready-stream-caret-blink {
@@ -815,7 +815,7 @@
   font-family: var(--rn-font-ui);
   font-size: var(--rn-fs-xs);
   line-height: 1.4;
-  transition: background-color var(--rn-d-1) ease, color var(--rn-d-1) ease;
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .ready-code-block-copy:hover {

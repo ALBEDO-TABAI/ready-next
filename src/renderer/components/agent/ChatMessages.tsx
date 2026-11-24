@@ -38,6 +38,7 @@ import type {
   CodexConversationContextBoundary,
   CodexProductTurnActionProjection,
 } from '../../../shared/ipc-contracts/agent-runtime'
+import { scrollBehavior } from '../../design/next/motion'
 
 // 收下 an answer (W6 §3.2): a card on a board, or a page through the draft and the Save To dialog.
 function openAnswerMenu(element: HTMLElement, message: AgentMessage) {
@@ -246,7 +247,7 @@ export default function ChatMessages({
   // card), composer-resize-driven inset changes must not drag the view back down.
   useEffect(() => {
     if (revealTarget?.scopeId === conversationId || !isNearBottomRef.current) return
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    messagesEndRef.current?.scrollIntoView({ behavior: scrollBehavior() })
   }, [visibleMessages.length, bottomOverlayInset, revealTarget, conversationId])
   useEffect(() => {
     if (!revealTarget) return
@@ -518,7 +519,7 @@ export default function ChatMessages({
                 {msg.id === lastUserMessageId && msg.content?.trim() ? (
                   <div
                     data-chat-user-message-actions="true"
-                    className={`flex items-center gap-1 self-end transition-opacity duration-160 ease-out ${
+                    className={`flex items-center gap-1 self-end transition-opacity duration-(--rn-d-1) ease-out ${
                       copiedMessageId === msg.id
                         ? 'opacity-100'
                         : 'opacity-0 group-hover/usermsg:opacity-100 group-focus-within/usermsg:opacity-100'
@@ -537,7 +538,7 @@ export default function ChatMessages({
                     <IconButton
                       size="sm"
                       icon={copiedMessageId === msg.id
-                        ? <Check style={MESSAGE_ACTION_ICON} />
+                        ? <Check className="rn-glyph-in" style={MESSAGE_ACTION_ICON} />
                         : <Copy style={MESSAGE_ACTION_ICON} />}
                       onClick={() => { void onCopyMessage(msg.id, msg.content) }}
                       style={copiedMessageId === msg.id
@@ -587,7 +588,7 @@ export default function ChatMessages({
                   ) : null}
                   {(!!msg.content?.trim() || retryRunId) && (
                     <div
-                      className={`absolute flex items-center gap-1 transition-[opacity,transform] duration-160 ease-out ${
+                      className={`absolute flex items-center gap-1 transition-[opacity,transform] duration-(--rn-d-1) ease-out ${
                         copiedMessageId === msg.id
                           ? 'opacity-100 pointer-events-auto'
                           : 'opacity-0 pointer-events-none group-hover/agentmsg:opacity-100 group-hover/agentmsg:pointer-events-auto'
@@ -611,7 +612,7 @@ export default function ChatMessages({
                         <IconButton
                           size="sm"
                           icon={copiedMessageId === msg.id
-                            ? <Check style={MESSAGE_ACTION_ICON} />
+                            ? <Check className="rn-glyph-in" style={MESSAGE_ACTION_ICON} />
                             : <Copy style={MESSAGE_ACTION_ICON} />}
                           onClick={() => { void onCopyMessage(msg.id, msg.content) }}
                           style={copiedMessageId === msg.id

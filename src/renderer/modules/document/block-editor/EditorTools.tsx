@@ -22,6 +22,8 @@ import { capsuleSource, findReferences, openInlineReference, settledCapsuleRefer
 import { activateRefCapsule, enterRefCapsule, leaveRefCapsule, openRefCapsuleMenu, startRefCapsuleDrag } from '../../../components/ui/ref-capsule-actions'
 import type { RefCapsuleKind } from '../../../components/ui/ref-capsule-kinds'
 import type { EditorBuffer } from './editor-buffer'
+import { flashElement } from '../../../design/next/motion'
+import { useLeavingRef } from '../../../components/ui/leave'
 
 interface Selection {
   block: DocumentBlock; model: InlineModel; snapshot: DocumentBuffer; start: number; end: number; anchor: MenuAnchor
@@ -33,6 +35,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
   const extensions = useAnnotationMenus()
   const tabId = buffer.owner.kind === 'document' ? buffer.owner.tabId : undefined
   const root = useRef<HTMLDivElement>(null)
+  const pageFormRef = useLeavingRef<HTMLFormElement>()
   const sceneVisible = useSceneVisible(() => root.current)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [picker, setPicker] = useState<Picker | null>(null), [query, setQuery] = useState('')
@@ -64,7 +67,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       const element = block && root.current?.querySelector<HTMLElement>(`[data-block-start="${block.start}"]`)
       if (!element) throw new Error('日期提及所在段落尚不可用')
       element.scrollIntoView({ block: 'center' })
-      element.animate([{ backgroundColor: 'var(--rn-accent-soft)' }, { backgroundColor: 'transparent' }], { duration: 1800 })
+      flashElement(element)
     } catch (error) { console.warn('[EditorTools] locate date mention failed:', error instanceof Error ? error.message : String(error)); report(error) }
     useMentionNavigation.setState({ target: null })
   }, [mentionTarget, tabId, buffer.snapshot.content, report])
@@ -345,7 +348,7 @@ export function EditorTools({ buffer, linkBase, children, report }: { buffer: Ed
       const fence = '`'.repeat(Math.max(3, ...[...json.matchAll(/`+/g)].map(match => match[0].length + 1)))
       slashMarkdown(widget, `${fence}show-widget${eol}${json}${eol}${fence}`); setWidget(null)
     }} />
-    {sceneVisible && page && createPortal(<form className="rn-ui rn-float ready-block-popover" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
+    {sceneVisible && page && createPortal(<form ref={pageFormRef} className="rn-ui rn-float ready-block-popover" data-float-motion="down" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="新建子页面" style={{ left: page.picker.anchor.left, top: page.picker.anchor.bottom }}
       onSubmit={event => { event.preventDefault(); void createPage() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && page.state !== 'pending') setPage(null) }}>
       <input autoFocus className="rn-field" aria-label="子页面标题" required value={page.title} disabled={page.state !== 'editing'} onChange={event => setPage({ ...page, title: event.target.value })} />
       <button disabled={page.state === 'pending'} type="submit">{page.state === 'failed' ? '重试' : '创建并插入'}</button>

@@ -61,8 +61,7 @@ export default function MorphIconRailGroup({
               aria-pressed={isActive}
               data-active-glyph={ActiveIcon ? 'fill' : 'stroke'}
               data-split={secondaryId === id ? 'true' : undefined}
-              whileHover={!reduceMotion ? { y: -0.4 } : undefined}
-              whileTap={!reduceMotion ? { scale: 0.992, y: 0.4 } : undefined}
+              // The press is the one press of the app (V9, workbench-sliders.css): no hover lift, no framer tap.
               className={`icon-rail-slider__button ${isRemembered ? 'is-remembered' : ''}${isActive ? ' is-active' : ''}`}
             >
               <span className="icon-rail-slider__button-icon">

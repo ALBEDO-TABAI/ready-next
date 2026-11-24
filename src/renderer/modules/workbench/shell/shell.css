@@ -100,7 +100,13 @@
   background: transparent;
   color: var(--rn-ink-2);
   cursor: pointer;
-  transition: background-color var(--rn-d-1) var(--rn-ease-out), color var(--rn-d-1) var(--rn-ease-out);
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), color var(--rn-d-1) var(--rn-ease-std), transform var(--rn-d-release) var(--rn-ease-spring);
+}
+
+.shell-rail__button:active {
+  transform: scale(.94);
+  transition-duration: var(--rn-d-1);
+  transition-timing-function: var(--rn-ease-out);
 }
 
 .shell-rail__button:hover {
@@ -126,6 +132,17 @@
   font: 600 9px/14px var(--rn-font-mono);
   text-align: center;
   pointer-events: none;
+  /* a new count pops in on the spring (motion language M2); tabular digits keep a changing count from jittering */
+  font-variant-numeric: tabular-nums;
+  animation: shell-rail-badge-in var(--rn-d-2) var(--rn-ease-spring) both;
+}
+
+@keyframes shell-rail-badge-in {
+  from { opacity: 0; scale: .6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-rail__badge { animation-name: rn-fade-in; }
 }
 
 /* The one sidebar (W2 §2.2): the mode's navigator fills its slot. Docked (V18), the slot is a panel like the content's
@@ -164,47 +181,31 @@
   display: none;
 }
 
-/* V23: a mode change moves the navigators vertically, in the rail's direction, in step with the content's horizontal
-   slide (280ms on its curve, the mode scene's animation in ritual-overlay.css): going down the rail the new navigator
-   rises from below and the old one leaves upward; going up, the reverse. The leaving one lies over the other until it
-   has gone, inert; the panel stays put and clips them. */
+/* V23: a mode change moves the navigators vertically, in the rail's direction, in step with the content's scenes on
+   the same axis (motion language M2, the mode scenes in ritual-overlay.css): going down the rail the new navigator rises from
+   below and the old one leaves upward; going up, the reverse. The leaving one lies over the other until it has gone,
+   inert; the panel stays put and clips them. Transitions, so a change made mid-way turns a navigator around. */
+.shell-navigator {
+  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out);
+}
+
+@starting-style {
+  .shell-navigator[data-nav-motion='enter'] { transform: translate3d(0, var(--rn-shift-3), 0); opacity: 0; }
+  .shell-navigator[data-nav-motion='enter'][data-nav-direction='up'] { transform: translate3d(0, calc(-1 * var(--rn-shift-3)), 0); }
+}
+
 .shell-navigator[data-nav-motion='leave'] {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  animation: shell-navigator-leave-up 280ms cubic-bezier(0.24, 1, 0.36, 1) forwards;
+  opacity: 0;
+  transform: translate3d(0, calc(-.5 * var(--rn-shift-3)), 0);
+  transition-duration: var(--rn-d-1);
+  transition-timing-function: var(--rn-ease-std);
 }
 
 .shell-navigator[data-nav-motion='leave'][data-nav-direction='up'] {
-  animation-name: shell-navigator-leave-down;
-}
-
-.shell-navigator[data-nav-motion='enter'] {
-  animation: shell-navigator-enter-from-below 280ms cubic-bezier(0.24, 1, 0.36, 1) both;
-}
-
-.shell-navigator[data-nav-motion='enter'][data-nav-direction='up'] {
-  animation-name: shell-navigator-enter-from-above;
-}
-
-@keyframes shell-navigator-enter-from-below {
-  from { transform: translateY(var(--rn-s5)); opacity: 0; }
-  to { transform: none; opacity: 1; }
-}
-
-@keyframes shell-navigator-enter-from-above {
-  from { transform: translateY(calc(-1 * var(--rn-s5))); opacity: 0; }
-  to { transform: none; opacity: 1; }
-}
-
-@keyframes shell-navigator-leave-up {
-  from { transform: none; opacity: 1; }
-  to { transform: translateY(calc(-1 * var(--rn-s5))); opacity: 0; }
-}
-
-@keyframes shell-navigator-leave-down {
-  from { transform: none; opacity: 1; }
-  to { transform: translateY(var(--rn-s5)); opacity: 0; }
+  transform: translate3d(0, calc(.5 * var(--rn-shift-3)), 0);
 }
 
 /* One head line (V15): a navigator's header row is as tall as a panel's head row and starts at the same y, the title
@@ -286,7 +287,7 @@
 /* Each bead's place on the path in the row and in the column. They move as one train, like beads on a string: every
    bead travels the same distance (three pitches plus the bend) in the same time, so they keep their order and spacing
    round the corner and never pass one another; the row read left to right is the column read top to bottom. The
-   travel is a little longer than the panel's width change (180ms, modules/workbench/panel-motion.ts) so the bend is
+   travel (--rn-d-3) is a little longer than the panel's width change (--rn-d-2, modules/workbench/panel-motion.ts) so the bend is
    seen; a bead only ever moves towards the strip while the panel closes. */
 .shell-assistant-tools .shell-assistant-tool {
   position: absolute;
@@ -299,7 +300,7 @@
   /* The icon button's own feedback (primitives.css) stays alongside the travel. */
   transition:
     offset-distance var(--rn-d-3) var(--rn-ease-std),
-    transform 520ms var(--rn-ease-spring),
+    transform var(--rn-d-release) var(--rn-ease-spring),
     background-color var(--rn-d-1) var(--rn-ease-std),
     color var(--rn-d-1) var(--rn-ease-std);
 }
@@ -349,11 +350,11 @@
 }
 
 .shell-float-drawer[data-open='false'][data-side='right'] {
-  transform: translateX(var(--rn-s2));
+  transform: translateX(var(--rn-shift-2));
 }
 
 .shell-float-drawer[data-open='false'][data-side='left'] {
-  transform: translateX(calc(-1 * var(--rn-s2)));
+  transform: translateX(calc(-1 * var(--rn-shift-2)));
 }
 
 /* Focus moving into a drawer must not scroll the shell sideways: a scrolled shell row would shift
@@ -398,9 +399,5 @@
   .shell-float-drawer[data-open='false'],
   .shell-assistant-tools .shell-assistant-tool {
     transition: none;
-  }
-
-  .shell-navigator[data-nav-motion] {
-    animation: none;
   }
 }

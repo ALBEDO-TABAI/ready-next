@@ -182,7 +182,7 @@ function DatabaseContent({ databaseId, api = databaseAPI, initialViewId, viewNam
         <Button size="sm" variant="primary" className="rdb-new" aria-label="新建行" disabled={disabled} onClick={() => setCreating({ operationId: crypto.randomUUID(), title: '', submitted: false })}>新建</Button>
       </div>
     </header>
-    <div className="rdb-status" role="status">{busy ? '正在保存…' : conflict ? '冲突' : pending.size ? '已合入未保存缓冲' : '已保存'}<span>{query.total} 行</span></div>
+    <div className="rdb-status" role="status">{busy ? '正在保存…' : conflict ? '有冲突' : pending.size ? '有改动待保存' : '已保存'}<span>{query.total} 行</span></div>
     {error && <p role="alert" className="rdb-notice">{error}{conflict && reread}</p>}
     {!!pending.size && <p className="rdb-notice">请先保存原页面；当前修改尚未写入磁盘。保存后会自动更新。{reread}</p>}
     {!!query.issues.length && <details className="rdb-issues"><summary>{query.issues.length} 个字段需要处理</summary>{query.issues.map((issue, i) => <p key={i}>{issue.rowId} / {issue.fieldId}：{cellText(issue.cell)}</p>)}</details>}

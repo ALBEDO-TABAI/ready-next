@@ -100,7 +100,7 @@ export function WelcomePanelView({
             onClick={() => onSetInputSuggestion(suggestion.prompt)}
             aria-label={`将建议填入输入框：${suggestion.label}`}
             title={`${suggestion.label}：${suggestion.description}`}
-            className="group min-w-0 text-left transition-[background-color,transform] duration-150 ease-out bg-[var(--rn-inlay)] hover:-translate-y-px hover:bg-[var(--rn-inlay-hover)] active:translate-y-0 active:scale-[0.99]"
+            className="group min-w-0 text-left transition-[background-color,transform] duration-(--rn-d-1) ease-out bg-[var(--rn-inlay)] hover:-translate-y-px hover:bg-[var(--rn-inlay-hover)] active:translate-y-0 active:scale-[0.99]"
             style={{
               minHeight: 68,
               padding: 12,

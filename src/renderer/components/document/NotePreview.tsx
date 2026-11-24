@@ -39,6 +39,7 @@ import DocumentWidgetPreviewBlock from './DocumentWidgetPreviewBlock'
 import { ReadyBlockEditor } from '../../modules/document/block-editor/ReadyBlockEditor'
 import { resolveNotePreviewModel } from '../../modules/document/notePreviewModel'
 import { recordDocumentPerformanceCounter } from '../../../shared/document-performance-diagnostics'
+import { scrollBehavior } from '../../design/next/motion'
 
 interface NotePreviewProps {
   content: string
@@ -490,7 +491,7 @@ function NotePreview({
     const target = document.querySelector(`[data-ready-widget-title="${focusWidgetTitle.replace(/"/g, '\\"')}"]`)
     if (!(target instanceof HTMLElement)) return
     requestAnimationFrame(() => {
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      target.scrollIntoView({ block: 'center', behavior: scrollBehavior() })
     })
   }, [focusWidgetTitle, preview.widgets.length])
 

@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ReadyRefSchema } from '../../../../shared/ready-ref'
 import type { DateMentionRef } from '../../../../shared/calendar/date-mentions'
 import type { MenuAnchor } from './CommandMenu'
+import { useLeaveAsGhost } from '../../../components/ui/leave'
 
 export function DateMentionPicker({ value, anchor, save, close, open, report }: {
   value: DateMentionRef; anchor: MenuAnchor; save(ref: DateMentionRef): void; close(): void
   open(): Promise<unknown>; report(error: unknown): void
 }) {
   const [date, setDate] = useState(value.date), [at, setAt] = useState(value.at ?? '')
+  const panel = useRef<HTMLFormElement>(null)
+  useLeaveAsGhost(panel)
   const [remind, setRemind] = useState(value.remind === undefined ? '' : String(value.remind))
-  return createPortal(<form data-block-popup data-ready-native-overlay="" role="dialog" aria-label="日期与提醒" className="rn-float"
+  return createPortal(<form ref={panel} data-float-motion="down" data-block-popup data-ready-native-overlay="" role="dialog" aria-label="日期与提醒" className="rn-float"
     style={{ position: 'fixed', zIndex: 1000, left: anchor.left, top: anchor.bottom, padding: 12 }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') close() }}
     onSubmit={event => {

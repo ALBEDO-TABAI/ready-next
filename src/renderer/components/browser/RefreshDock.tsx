@@ -37,7 +37,7 @@ export default function RefreshDock({
         gap: visible && refreshDockMode === 'revealed' ? 6 : 0,
         opacity: visible ? 1 : 0,
         pointerEvents: visible ? 'auto' : 'none',
-        transition: 'width 180ms ease, gap 180ms ease, opacity 140ms ease',
+        transition: 'width var(--rn-d-2) var(--rn-ease-out), gap var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-1) var(--rn-ease-std)',
         overflow: 'hidden',
       }}
     >

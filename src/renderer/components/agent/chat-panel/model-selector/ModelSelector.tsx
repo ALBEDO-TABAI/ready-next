@@ -131,6 +131,7 @@ export default function ModelSelector() {
 
   const menu = open ? (
     <FloatPanel
+      motion="up"
       ref={menuRef}
       className="panel-hover-scrollbar"
       style={{
@@ -280,7 +281,7 @@ export default function ModelSelector() {
                                 width: 12,
                                 height: 12,
                                 transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                                transition: 'transform 180ms ease',
+                                transition: 'transform var(--rn-d-2) var(--rn-ease-std)',
                               }}
                               className="text-[var(--rn-ink-3)]"
                             />
@@ -387,7 +388,7 @@ export default function ModelSelector() {
           syncMenuFrame()
           setOpen(true)
         }}
-        className="flex items-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
+        className="flex items-center active:scale-[0.98] transition-[background-color,transform] duration-(--rn-d-2) ease-out"
         style={{
           padding: '3px 8px',
           borderRadius: 8,
@@ -406,7 +407,7 @@ export default function ModelSelector() {
             width: 10,
             height: 10,
             transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 200ms ease'
+            transition: 'transform var(--rn-d-2) var(--rn-ease-std)'
           }}
           className="text-[var(--rn-liquid-ink-3)]"
         />

@@ -485,7 +485,7 @@ export function BrowserPrivacySettingsPanel() {
                     className="flex min-w-0 cursor-pointer items-center gap-2.5 self-stretch text-left"
                   >
                     <ChevronRight
-                      className={`h-3.5 w-3.5 flex-shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
+                      className={`h-3.5 w-3.5 flex-shrink-0 transition-transform duration-(--rn-d-1) ${expanded ? 'rotate-90' : ''}`}
                       strokeWidth={2}
                       style={{ color: 'var(--rn-ink-3)' }}
                     />

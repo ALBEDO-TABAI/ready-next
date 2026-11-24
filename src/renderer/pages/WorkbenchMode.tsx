@@ -58,6 +58,13 @@ function setShellWidth(selector: string, width: number) {
   if (!element) return
   element.style.width = `${width}px`
   element.style.minWidth = `${width}px`
+  setShellOpenWidth(selector, width)
+}
+
+/** The width a panel has when open (--shell-open-w): its content keeps it while the column opens or closes, so the content
+ *  slides in and out with the panel's edge instead of reflowing every frame (motion language M4, flat-chrome.css). */
+function setShellOpenWidth(selector: string, width: number) {
+  document.querySelector<HTMLElement>(selector)?.style.setProperty('--shell-open-w', `${width}px`)
 }
 
 function setShellWillChange(selector: string, enabled: boolean) {
@@ -226,6 +233,7 @@ export default function WorkbenchMode() {
   useEffect(() => {
     const nextWidth = clampWorkbenchChatPanelWidth(chatPanelWidth)
     liveChatPanelWidthRef.current = nextWidth
+    setShellOpenWidth("[data-liquid-shell='chat-panel']", nextWidth)
     if (chatPanelVisible) {
       setShellWidth("[data-liquid-shell='chat-panel']", nextWidth)
     }

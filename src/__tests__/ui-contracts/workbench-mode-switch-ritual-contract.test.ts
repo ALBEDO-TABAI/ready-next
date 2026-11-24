@@ -41,7 +41,8 @@ test('workbench mode switching routes through the shared ritual overlay and imme
   assert.match(ritualOverlay, /data-phase=/)
 
   assert.match(outlet, /transitionPresentation\?: WorkbenchModeChangePresentation/)
-  assert.match(outlet, /shouldAnimateWorkbenchModeTransition\(transitionPresentation, prefersReducedMotion\(\)\)/)
+  // Reduced motion dissolves (the distance tokens are 0), so only the presentation decides (motion language M5).
+  assert.match(outlet, /shouldAnimateWorkbenchModeTransition\(transitionPresentation\)/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_ENTERING_OFFSET_PERCENT/)
   assert.doesNotMatch(outlet, /MODE_LEAVING_FADE_OPACITY/)

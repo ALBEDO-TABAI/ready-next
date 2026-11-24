@@ -104,7 +104,7 @@ function CodeBlockWithCopy({
 
   useEffect(() => {
     if (!copied) return
-    const timer = window.setTimeout(() => setCopied(false), 1200)
+    const timer = window.setTimeout(() => setCopied(false), 1500)
     return () => window.clearTimeout(timer)
   }, [copied])
 
@@ -125,7 +125,7 @@ function CodeBlockWithCopy({
         onClick={() => { void handleCopy() }}
       >
         {copied ? (
-          <Check style={{ width: 14, height: 14 }} strokeWidth={2} />
+          <Check className="rn-glyph-in" style={{ width: 14, height: 14 }} strokeWidth={2} />
         ) : (
           <Copy style={{ width: 14, height: 14 }} strokeWidth={2} />
         )}

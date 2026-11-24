@@ -63,9 +63,11 @@ test('chat composer keeps a visible shell and a primary send button after liquid
   assert.match(chatInput, /<LiquidLens/)
   assert.match(chatInput, /data-ready-agent-send="true"/)
   assert.match(chatInput, /aria-label=\{sendBlockedReason \|\| '发送'\}/)
-  // B13: the send button is solid ink (--rn-inverse / --rn-on-inverse), the primary-button colours of W1 DL5.
-  assert.match(chatInput, /background: 'var\(--rn-inverse\)'/)
-  assert.match(chatInput, /color: 'var\(--rn-on-inverse\)'/)
+  // B13: the send button is solid ink (--rn-inverse / --rn-on-inverse), the primary-button colours of W1 DL5; since the
+  // motion language (2026-11-24) send and stop are one .ready-composer-action whose glyphs crossfade.
+  const composerStyles = readWorkspaceFile('src/renderer/styles/liquid-composer.css')
+  assert.match(chatInput, /className="ready-composer-action"/)
+  assert.match(composerStyles, /\.ready-composer-action \{[\s\S]*?background: var\(--rn-inverse\);[\s\S]*?color: var\(--rn-on-inverse\);/)
   assert.doesNotMatch(chatPanelBody, /id="chat-input-shell"/)
 })
 

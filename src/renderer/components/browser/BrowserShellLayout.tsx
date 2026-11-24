@@ -4,6 +4,7 @@ import readyWordmark from '../../assets/ready-wordmark.svg'
 import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import { Button } from '../ui'
+import { useLeavingRef } from '../ui/leave'
 
 interface BrowserShellLayoutProps {
   isElectron: boolean
@@ -37,6 +38,8 @@ export default function BrowserShellLayout({
   const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
   // The native page is showing in this frame (not the blank page, an error or the reading view over it).
   const showNativePage = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error && !cover
+  // The loading line creeps forward and never rewinds; when the page has loaded it fades out where it got to.
+  const progressRef = useLeavingRef<HTMLDivElement>()
 
   return (
     // One pane of the browser panel's framed body (V11): the bands for this page, then the page, inset by the frame pad.
@@ -44,7 +47,7 @@ export default function BrowserShellLayout({
       {band}
       <div className="browser-pane__page">
         {/* Loading: a quiet ink line in the frame gap above the page; it takes no room, so the page never shifts. */}
-        {activeTab?.loading && <div className="browser-pane__progress" aria-hidden="true"><span /></div>}
+        {activeTab?.loading && <div ref={progressRef} className="browser-pane__progress" aria-hidden="true"><span /></div>}
         <div
           ref={contentRef}
           data-browser-local-media-drop-surface=""
@@ -131,7 +134,7 @@ export default function BrowserShellLayout({
                 alignItems: 'center',
                 gap: 8,
                 zIndex: 30,
-                animation: 'cookieToastFade 3s ease-in-out forwards',
+                animation: 'cookieToastFade calc(var(--rn-d-flash) * 2.5) var(--rn-ease-std) forwards',
                 pointerEvents: 'none',
                 whiteSpace: 'nowrap',
               }}

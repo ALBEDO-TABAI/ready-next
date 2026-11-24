@@ -15,6 +15,7 @@ import RSSTopbarTools from './RSSTopbarTools'
 import { Button, IconButton } from '../ui/Button'
 import { Input } from '../ui/Field'
 import { Segmented, Switch } from '../ui/Toggle'
+import { scrollBehavior } from '../../design/next/motion'
 
 const time = (value: number, timezone: string) => new Date(value).toLocaleString(undefined, { timeZone: timezone })
 const editionDate = (value: number, timezone: string, withTime: boolean) => new Date(value).toLocaleString('zh-CN', {
@@ -193,7 +194,7 @@ export default function RSSDigestPanel({ active, view, definitions = [], feedSou
     }
     return groups
   }, [shelf])
-  const scrollTo = (id: string) => mainRef.current?.querySelector(`[data-digest-anchor="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const scrollTo = (id: string) => mainRef.current?.querySelector(`[data-digest-anchor="${id}"]`)?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' })
   const reportDate = report ? dateParts(report.until, report.timezone) : null
   const sources = (entry: RSSDigestEntry) => <Sources key={`${report!.id}:${entry.groupKey}`} reportId={report!.id} groupKey={entry.groupKey} />
 

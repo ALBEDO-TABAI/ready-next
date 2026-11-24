@@ -3,8 +3,22 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { BoundedLruCache } from '../../../shared/bounded-lru'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from './resize-events'
 import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
+import { BROWSER_FREEZE_REQUEST_EVENT, BROWSER_OVERLAY_LOCK_EVENT, type BrowserFreezeRequestDetail } from '../overlay/browserViewMask'
 
 const FREEZE_RELEASE_DELAY_MS = 220
+
+/** Resolves once the still can be painted without a blank frame (a large PNG data URL takes a moment to decode). */
+function decodeFrame(src: string): Promise<void> {
+  if (typeof Image === 'undefined') return Promise.resolve()
+  const image = new Image()
+  image.src = src
+  return image.decode().catch(() => undefined)
+}
+
+/** Resolves after the next paint, when a state change has reached the screen. */
+function nextPaint(): Promise<void> {
+  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+}
 const WINDOW_RESIZE_SETTLE_DELAY_MS = 120
 const cachedFreezeFramesByKey = new BoundedLruCache<string, BrowserResizeFreezeFrame>(6)
 
@@ -41,6 +55,8 @@ export function useBrowserResizeFreeze({
   const freezeCacheKeyRef = useRef(resolvedFreezeCacheKey)
   const previousFreezeCacheKeyRef = useRef(resolvedFreezeCacheKey)
   const resizingRef = useRef(false)
+  /** A float over the page holds the native view hidden (browserViewMask.ts): its still must stay. */
+  const maskHeldRef = useRef(false)
   const windowResizingRef = useRef(false)
   const captureSessionRef = useRef(0)
   const releaseTimerRef = useRef<number | null>(null)
@@ -121,6 +137,8 @@ export function useBrowserResizeFreeze({
 
   const recaptureFreezeFrame = useCallback(async (sessionId: number) => {
     if (!isElectron || !isActive || !browserRuntimeReady || !surfaceRef.current) return
+    // A float's mask has the page hidden: a capture now would be of the hidden page and replace the good still.
+    if (maskHeldRef.current) return
 
     const nextFrame = await captureSnapshot()
     if (!nextFrame) return
@@ -149,6 +167,8 @@ export function useBrowserResizeFreeze({
 
     const sessionId = captureSessionRef.current + 1
     captureSessionRef.current = sessionId
+    // A float's mask already shows the latest still of this page: keep it rather than an older cached one.
+    if (maskHeldRef.current) return
     if (cachedFreezeFrameRef.current) {
       setFreezeFrame(cachedFreezeFrameRef.current)
       return
@@ -186,7 +206,8 @@ export function useBrowserResizeFreeze({
     clearReleaseTimer()
     releaseTimerRef.current = window.setTimeout(() => {
       captureSessionRef.current += 1
-      if (!resizingRef.current) {
+      // A float still masks the page: its still stays until the mask lets go (the effect below).
+      if (!resizingRef.current && !maskHeldRef.current) {
         setFreezeFrame(null)
       }
       releaseTimerRef.current = null
@@ -253,6 +274,64 @@ export function useBrowserResizeFreeze({
       if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
     }
   }, [browserRuntimeReady, captureStableFrame, isActive, isElectron, resolvedFreezeCacheKey])
+
+  // A float over the page (browserViewMask.ts): paint a fresh still of the page before the native view steps aside,
+  // and let it go once the view is back (the same release delay as after a resize), so the page never goes blank.
+  // Overlapping requests share one capture; the still is decoded and painted before the request is answered. Masks are
+  // counted (persistent lock / unlock events), so the still stays while any of them hides the page, a resize never takes
+  // it away meanwhile (maskHeldRef), and the last unlock lets it go even if it came during a resize.
+  useEffect(() => {
+    if (!isElectron) return
+    let maskSession = 0
+    let locks = 0
+    let requesting = false
+    let inflight: Promise<void> | null = null
+    const held = () => locks > 0 || requesting
+    const onFreezeRequest = (event: Event) => {
+      const detail = (event as CustomEvent<BrowserFreezeRequestDetail>).detail
+      if (!detail || !isActive || !browserRuntimeReady || !surfaceRef.current) return
+      requesting = true
+      maskHeldRef.current = true
+      clearReleaseTimer()
+      // Mid-resize the resize's still is already up and stays (maskHeldRef keeps it past the resize).
+      if (resizingRef.current) return
+      if (!inflight) {
+        const session = ++maskSession
+        inflight = captureSnapshot().then(async frame => {
+          if (!frame || session !== maskSession || !held()) return
+          await decodeFrame(frame.src)
+          if (session !== maskSession || !held()) return
+          setFreezeFrame(frame)
+          await nextPaint()
+        }).finally(() => { inflight = null })
+      }
+      detail.hold(inflight)
+    }
+    const onLock = (event: Event) => {
+      const detail = (event as CustomEvent<{ locked?: boolean; persistent?: boolean }>).detail
+      if (!detail?.persistent) return
+      if (detail.locked !== false) { locks += 1; requesting = false; maskHeldRef.current = true; return }
+      locks = Math.max(0, locks - 1)
+      if (held()) return
+      maskHeldRef.current = false
+      const session = ++maskSession
+      clearReleaseTimer()
+      // During a resize the resize's own release clears the still once it settles (maskHeldRef is now false).
+      if (resizingRef.current) return
+      releaseTimerRef.current = window.setTimeout(() => {
+        releaseTimerRef.current = null
+        if (session === maskSession && !resizingRef.current && !maskHeldRef.current) setFreezeFrame(null)
+      }, FREEZE_RELEASE_DELAY_MS)
+    }
+    window.addEventListener(BROWSER_FREEZE_REQUEST_EVENT, onFreezeRequest)
+    window.addEventListener(BROWSER_OVERLAY_LOCK_EVENT, onLock)
+    return () => {
+      window.removeEventListener(BROWSER_FREEZE_REQUEST_EVENT, onFreezeRequest)
+      window.removeEventListener(BROWSER_OVERLAY_LOCK_EVENT, onLock)
+      maskSession += 1
+      maskHeldRef.current = false
+    }
+  }, [browserRuntimeReady, captureSnapshot, clearReleaseTimer, isActive, isElectron, setFreezeFrame, surfaceRef])
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current

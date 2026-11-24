@@ -89,7 +89,7 @@
   gap: 4px 3px;
   transform: translate(-50%, -50%);
   opacity: 0.28;
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity var(--rn-d-1) var(--rn-ease-std), transform var(--rn-d-1) var(--rn-ease-std);
 }
 
 .workbench-split-resize-handle__grip span {
@@ -126,7 +126,7 @@ body.resizing .workbench-split-resize-handle__grip {
   transform: translateX(-50%);
   background: color-mix(in srgb, var(--rn-ink-3) 22%, transparent);
   opacity: 0.62;
-  transition: background 0.15s, opacity 0.15s;
+  transition: background-color var(--rn-d-1) var(--rn-ease-std), opacity var(--rn-d-1) var(--rn-ease-std);
 }
 
 .document-split-resize-handle__grip {
@@ -141,7 +141,7 @@ body.resizing .workbench-split-resize-handle__grip {
   background-repeat: repeat-y;
   background-position: center;
   background-size: 2px 7px;
-  transition: opacity 0.15s;
+  transition: opacity var(--rn-d-1) var(--rn-ease-std);
 }
 
 .document-split-resize-handle:hover::before {
@@ -168,7 +168,7 @@ body.resizing .workbench-split-resize-handle__grip {
   border-radius: var(--rn-r-md);
   background: color-mix(in srgb, var(--rn-accent-soft) 38%, transparent);
   opacity: 0;
-  transition: opacity 0.12s ease-out;
+  transition: opacity var(--rn-d-1) var(--rn-ease-std);
 }
 
 .document-pane-drop-target.is-document-pane-drop-target::after {
@@ -219,11 +219,12 @@ body.resizing .browser-split-resize-handle__grip {
   display: flex;
   flex-direction: column;
   opacity: 0;
-  transform: translateX(12px);
+  transform: translateX(var(--rn-shift-2));
   pointer-events: none;
+  /* closing: out faster, on the leaving curve; opening (.is-entered): in on the arrival curve (motion language M2) */
   transition:
-    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    opacity var(--rn-d-1) var(--rn-ease-std),
+    transform var(--rn-d-2) var(--rn-ease-in);
   will-change: opacity, transform;
   -webkit-app-region: no-drag;
 }
@@ -232,6 +233,7 @@ body.resizing .browser-split-resize-handle__grip {
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
+  transition: opacity var(--rn-d-2) var(--rn-ease-out), transform var(--rn-d-3) var(--rn-ease-out);
 }
 
 .browser-fastcard-surface {
@@ -517,9 +519,20 @@ html[data-browser-agent-pointer-window='true'] #root {
   color: var(--rn-ink-2);
 }
 
-/* The agent's pointer over the native page (W7): the assistant at work, so the signal colour. */
+/* The agent's pointer over the native page (W7): the assistant at work, so the signal colour. It glides to each place
+   the agent acts (both ends are on screen: the in-out curve) and the ring tightens while it presses. */
+.browser-agent-pointer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transition: transform var(--rn-d-3) var(--rn-ease-in-out);
+  will-change: transform;
+}
+
 .browser-agent-pointer__ring {
   position: absolute;
+  left: 0;
+  top: 0;
   width: 22px;
   height: 22px;
   border: 2px solid color-mix(in srgb, var(--rn-accent) 55%, transparent);
@@ -527,18 +540,19 @@ html[data-browser-agent-pointer-window='true'] #root {
   background: color-mix(in srgb, var(--rn-accent) 6%, transparent);
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--rn-accent) 8%, transparent), var(--rn-shadow-2);
   transform: translate(-50%, -50%);
-  transition: left 90ms linear, top 90ms linear, width 90ms ease, height 90ms ease;
+  transition: transform var(--rn-d-1) var(--rn-ease-out), border-color var(--rn-d-1) var(--rn-ease-std), background-color var(--rn-d-1) var(--rn-ease-std);
 }
 
 .browser-agent-pointer__ring[data-pressed='true'] {
-  width: 34px;
-  height: 34px;
+  transform: translate(-50%, -50%) scale(.82);
   border-color: color-mix(in srgb, var(--rn-accent) 90%, transparent);
   background: color-mix(in srgb, var(--rn-accent) 14%, transparent);
 }
 
 .browser-agent-pointer__label {
   position: absolute;
+  left: 11px;
+  top: 11px;
   padding: 3px 7px;
   border-radius: var(--rn-r-pill);
   background: var(--rn-inverse);
@@ -549,6 +563,7 @@ html[data-browser-agent-pointer-window='true'] #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .browser-agent-pointer,
   .browser-agent-pointer__ring {
     transition: none;
   }

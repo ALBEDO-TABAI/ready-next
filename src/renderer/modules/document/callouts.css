@@ -11,7 +11,7 @@
 .ready-callout-title::before { content: '💡'; flex: none; width: 22px; text-align: center; font-weight: 400; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; }
 summary.ready-callout-title { cursor: pointer; list-style: none; }
 summary.ready-callout-title::-webkit-details-marker { display: none; }
-summary.ready-callout-title::after { content: '›'; margin-left: 2px; color: var(--rn-ink-3); transition: transform var(--rn-d-2) var(--rn-ease-out); }
+summary.ready-callout-title::after { content: '›'; margin-left: 2px; color: var(--rn-ink-3); transition: transform var(--rn-d-2) var(--rn-ease-std); }
 details.ready-callout[open] > summary.ready-callout-title::after { transform: rotate(90deg); }
 .ready-callout-body { margin: 4px 0 0 32px; }
 .ready-callout-body > :first-child { margin-top: 0; }

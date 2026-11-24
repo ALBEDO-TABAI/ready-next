@@ -87,6 +87,14 @@
   opacity: 0.82;
 }
 
+/* The frosted copy under the composer is a still picture (motion language M4): the transcript's spinners, sweeps and
+   pulses would otherwise run a second time under the blur and re-raster it every frame. */
+.ready-liquid-composer__projection-clone,
+.ready-liquid-composer__projection-clone * {
+  animation: none !important;
+  transition: none !important;
+}
+
 .ready-liquid-composer:focus-within .ready-liquid-composer__surface::after {
   opacity: 0.52;
 }
@@ -167,6 +175,22 @@ html[data-theme='dark']:root .ready-liquid-composer [data-ready-agent-send='true
   opacity: 1;
 }
 
+/* Stop is the same ink button as send (motion language M2): the dark rules above hold for both, hover included, so the
+   button keeps its ink and contrast when it turns from send into stop under the pointer. */
+html[data-theme='dark']:root .ready-liquid-composer .ready-composer-action {
+  background: var(--rn-inverse) !important;
+  border-color: color-mix(in srgb, var(--rn-inverse) 72%, transparent) !important;
+  color: var(--rn-on-inverse) !important;
+}
+
+html[data-theme='dark']:root .ready-liquid-composer .ready-composer-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rn-inverse) 92%, transparent) !important;
+}
+
+html[data-theme='dark']:root .ready-liquid-composer .ready-composer-action svg {
+  color: var(--rn-on-inverse) !important;
+}
+
 /* The reference-skill hint above the composer is a float (.rn-float, W1 §4): plain blur, no lens. */
 .ready-liquid-card {
   border-color: transparent !important;
@@ -224,3 +248,43 @@ html:root .ready-chat-project-pill svg {
 .ready-chat-project-search { display: flex; align-items: center; gap: 8px; padding: 6px 8px 12px; color: var(--rn-ink-3); }
 .ready-chat-project-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--rn-ink); background: transparent; font-size: var(--rn-fs-md); }
 .ready-chat-project-error { position: absolute; bottom: calc(100% + 6px); left: 0; width: 220px; padding: 8px 10px; border-radius: var(--rn-r-sm); background: var(--rn-solid); box-shadow: var(--rn-shadow-2), inset 0 0 0 1px var(--rn-hair); color: var(--rn-bad); font-size: var(--rn-fs-sm); z-index: 2; }
+
+/* Send / stop (ChatInput.tsx, motion language M2): one ink button in one place. Its glyphs share a cell and crossfade,
+   the arriving one growing in slightly; a press shrinks it to .94 and the release springs back (V9). */
+.ready-composer-action {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--rn-on-inverse) 8%, transparent);
+  border-radius: 16px;
+  background: var(--rn-inverse);
+  color: var(--rn-on-inverse);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    transform var(--rn-d-release) var(--rn-ease-spring),
+    opacity var(--rn-d-1) var(--rn-ease-std),
+    filter var(--rn-d-1) var(--rn-ease-std);
+}
+
+.ready-composer-action:hover:not(:disabled) { filter: brightness(.95); }
+.ready-composer-action:active:not(:disabled) { transform: scale(.94); transition-duration: var(--rn-d-1); transition-timing-function: var(--rn-ease-out); }
+.ready-composer-action:disabled { cursor: not-allowed; }
+.ready-composer-action[aria-busy='true'] { cursor: wait; }
+
+.ready-composer-action__glyphs { display: grid; place-items: center; }
+.ready-composer-action__glyphs > svg {
+  grid-area: 1 / 1;
+  opacity: 0;
+  scale: .7;
+  transition: opacity var(--rn-d-1) var(--rn-ease-std), scale var(--rn-d-2) var(--rn-ease-out);
+}
+.ready-composer-action__glyphs > svg[data-shown='true'] { opacity: 1; scale: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ready-composer-action__glyphs > svg { scale: 1; }
+  .ready-composer-action:active:not(:disabled) { transform: none; }
+}

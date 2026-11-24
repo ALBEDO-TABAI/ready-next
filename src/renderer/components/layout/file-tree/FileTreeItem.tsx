@@ -93,7 +93,7 @@ export function FileTreeItem({
       }
       className={`
         flex items-center gap-[6px] rounded-[var(--rn-r-sm)] text-[13px] cursor-pointer
-        transition-[background-color,box-shadow,color] duration-200 ease-out group
+        transition-[background-color,box-shadow,color] duration-(--rn-d-2) ease-out group
         ${isFlashing ? 'file-tree-item-flash-complete' : ''}
       `}
       // ListRow's look (W1 §5, V5): a 30px row in ink-2, hover fill, and the selected row in the selected fill with

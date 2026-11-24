@@ -16,8 +16,32 @@ export function rectanglesIntersect(
     && left.bottom > right.top
 }
 
+/**
+ * Every outlet mounts this hook (two in a split view), but the scan is global — all overlays against all native surfaces —
+ * so one scan runs while any outlet is mounted: it starts with the first and stops with the last, never handed over
+ * (a hand-over would drop and re-take the mask under an open menu). Two scans would each hide, mask and reveal the same
+ * float and race each other's acknowledgements.
+ */
+let scanUsers = 0
+let stopScan: (() => void) | null = null
+
 export function useNativeSurfaceAwareOverlay(): void {
   useLayoutEffect(() => {
+    scanUsers += 1
+    if (!stopScan) stopScan = startOverlayScan()
+    return () => {
+      scanUsers -= 1
+      // Outlets remounted in one commit (a split view closing) unmount before they mount again: wait for the commit to
+      // finish, and keep the scan — and the mask under an open float — if an outlet is back.
+      queueMicrotask(() => {
+        if (scanUsers === 0 && stopScan) { stopScan(); stopScan = null }
+      })
+    }
+  }, [])
+}
+
+function startOverlayScan(): () => void {
+  {
     let frame: number | null = null
     let masked = false
     let hidePending = false
@@ -27,7 +51,14 @@ export function useNativeSurfaceAwareOverlay(): void {
     const hidden = new Map<HTMLElement, string>()
 
     const reveal = () => {
-      for (const [element, visibility] of hidden) element.style.visibility = visibility
+      for (const [element, visibility] of hidden) {
+        element.style.visibility = visibility
+        // Its entrance (data-float-motion, motion language M2) ran while it waited unseen for the web view to step
+        // aside: start it again now that it can be seen.
+        for (const animation of element.getAnimations?.() ?? []) {
+          if (animation.playState !== 'finished' || element.hasAttribute('data-float-motion')) animation.currentTime = 0
+        }
+      }
       hidden.clear()
     }
 
@@ -95,5 +126,5 @@ export function useNativeSurfaceAwareOverlay(): void {
       reveal()
       if (masked) void endPersistentBrowserMask()
     }
-  }, [])
+  }
 }

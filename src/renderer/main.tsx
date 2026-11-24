@@ -8,6 +8,7 @@ if (!(globalThis as any).Temporal) {
 
 import React from 'react'
 import ReactDOM, { type Root } from 'react-dom/client'
+import { MotionConfig } from 'framer-motion'
 import { HashRouter } from 'react-router-dom'
 import './styles/index.css'
 import './styles/ritual-overlay.css'
@@ -72,9 +73,12 @@ function renderApp(App: AppComponent) {
   if (!root) throw new Error('Renderer root is not initialized')
   root.render(
     <React.StrictMode>
-      <HashRouter>
-        <App />
-      </HashRouter>
+      {/* framer-motion follows the system's reduced motion everywhere: transforms stop, fades stay (motion language M5). */}
+      <MotionConfig reducedMotion="user">
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </MotionConfig>
     </React.StrictMode>
   )
 }

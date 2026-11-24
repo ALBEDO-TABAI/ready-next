@@ -25,6 +25,7 @@ import {
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
 import { IconButton } from '../ui'
+import { scrollBehavior } from '../../design/next/motion'
 
 interface TabRailProps {
   isActive: boolean
@@ -328,14 +329,14 @@ export default function TabRail({
         className="flex h-[24px] flex-shrink-0 items-center justify-center"
         style={{
           width: showLeftArrow ? 24 : 0,
-          transition: 'width 160ms ease',
+          transition: 'width var(--rn-d-2) var(--rn-ease-out)',
         }}
       >
         <IconButton
           size="sm"
           icon={<ChevronLeft />}
           title="向左滚动标签"
-          onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
+          onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: scrollBehavior() })}
           style={{ opacity: showLeftArrow ? 1 : 0, pointerEvents: showLeftArrow ? 'auto' : 'none' }}
           tabIndex={showLeftArrow ? 0 : -1}
           aria-hidden={!showLeftArrow}
@@ -454,7 +455,7 @@ export default function TabRail({
                       void onTabClick(tab.id, event)
                     }}
                     onAuxClick={isStarterTab ? undefined : (event) => handleAuxClick(event, tab.id)}
-                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[var(--rn-r-sm)] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-150"
+                    className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[var(--rn-r-sm)] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-(--rn-d-1)"
                     title={`${tab.title || 'New Tab'}\n按住 Shift 点击可双开`}
                     style={{
                       gap: 6,
@@ -612,14 +613,14 @@ export default function TabRail({
         className="flex h-[24px] flex-shrink-0 items-center justify-center"
         style={{
           width: showRightArrow ? 24 : 0,
-          transition: 'width 160ms ease',
+          transition: 'width var(--rn-d-2) var(--rn-ease-out)',
         }}
       >
         <IconButton
           size="sm"
           icon={<ChevronRight />}
           title="向右滚动标签"
-          onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+          onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: scrollBehavior() })}
           style={{ opacity: showRightArrow ? 1 : 0, pointerEvents: showRightArrow ? 'auto' : 'none' }}
           tabIndex={showRightArrow ? 0 : -1}
           aria-hidden={!showRightArrow}

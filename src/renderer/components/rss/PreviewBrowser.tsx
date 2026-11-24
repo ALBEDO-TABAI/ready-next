@@ -10,6 +10,7 @@ import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
 import { Button, IconButton } from '../ui/Button'
 import { EmptyState } from '../ui/Display'
+import { useOverlayPageStill } from '../../modules/overlay/useOverlayPageStill'
 
 interface PreviewBrowserProps {
   item: RSSItem
@@ -42,6 +43,8 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   const [isMounted, setIsMounted] = useState(false)
   const [isExiting, setIsExiting] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  // A float over the native preview: a still of the page stands in while the view steps aside (motion language M2).
+  useOverlayPageStill(contentRef, isActive)
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setIsMounted(true))
@@ -127,12 +130,16 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   }, [onClose])
 
   // 原生预览在 DOM 浮层（菜单、对话框）出现时会被统一隐藏；浮层收起后按当前位置重新放回。
+  // Persistent masks are counted, so with two floats up the preview comes back only when the last one goes.
   useEffect(() => {
     if (!isActive) return
+    let persistentLocks = 0
     const restore = (event: Event) => {
-      const locked = (event as CustomEvent<{ locked?: boolean }>).detail?.locked
+      const detail = (event as CustomEvent<{ locked?: boolean; persistent?: boolean }>).detail
+      const locked = detail?.locked
+      if (detail?.persistent) persistentLocks = Math.max(0, persistentLocks + (locked === false ? -1 : 1))
       if (locked === true) overlayLocked.current = true
-      if (locked !== false) return
+      if (locked !== false || persistentLocks > 0) return
       overlayLocked.current = false
       scheduleBoundsSync({ force: true, trailingFinal: true })
     }

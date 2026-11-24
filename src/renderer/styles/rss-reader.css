@@ -414,7 +414,7 @@
 
 .rss-preview-floating {
   opacity: 0;
-  transform: translateX(12px);
+  transform: translateX(var(--rn-shift-2));
   transition:
     opacity var(--rn-d-2) var(--rn-ease-out),
     transform var(--rn-d-2) var(--rn-ease-out);
@@ -428,7 +428,7 @@
 
 .rss-preview-floating.is-exiting {
   opacity: 0;
-  transform: translateX(12px);
+  transform: translateX(var(--rn-shift-2));
   pointer-events: none;
 }
 
@@ -539,7 +539,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rss-preview-floating {
-    transition-duration: 80ms;
+    transition-duration: var(--rn-d-1);
   }
 }
 

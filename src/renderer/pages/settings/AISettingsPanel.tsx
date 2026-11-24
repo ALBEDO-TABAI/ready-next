@@ -23,6 +23,7 @@ import {
   normalizeChatGptOAuthReasoningEffort,
 } from '../../../shared/chatgpt-oauth'
 import { ChatGptOAuthSettingsCard } from './ChatGptOAuthSettingsCard'
+import { StableLabel } from '../../components/ui/StableLabel'
 
 const AGENT_PROTOCOL_OPTIONS = [
   { value: 'auto', label: '自动' },
@@ -194,7 +195,7 @@ export function AISettingsPanel() {
   }, [updateField])
 
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
-    if (capabilityRuntimeLoading) return { label: '刷新中...', tone: 'muted' as const }
+    if (capabilityRuntimeLoading) return { label: '正在刷新…', tone: 'muted' as const }
     const snapshot = capabilityRuntimeSnapshotKey === capabilitySnapshotKey ? capabilityRuntimeSnapshot?.groups[groupId] : null
     if (!snapshot) return { label: '未刷新', tone: 'muted' as const }
     if (snapshot.status === 'inactive') return { label: '保留占位', tone: 'muted' as const }
@@ -426,7 +427,7 @@ export function AISettingsPanel() {
                   aria-busy={testStatus === 'testing' ? true : undefined}
                   icon={testStatus === 'testing' ? <Loader2 className="animate-spin" /> : undefined}
                 >
-                  {testStatus === 'testing' ? '测试中' : '测试'}
+                  <StableLabel reserve={['测试', '正在测试…']}>{testStatus === 'testing' ? '正在测试…' : '测试'}</StableLabel>
                 </Button>
               </>
             )}
@@ -745,7 +746,7 @@ export function AISettingsPanel() {
                           aria-busy={capabilityRuntimeLoading ? true : undefined}
                           icon={<RefreshCw className={capabilityRuntimeLoading ? 'animate-spin' : ''} />}
                         >
-                          {capabilityRuntimeLoading ? '刷新中' : '刷新状态'}
+                          <StableLabel reserve={['刷新状态', '正在刷新…']}>{capabilityRuntimeLoading ? '正在刷新…' : '刷新状态'}</StableLabel>
                         </Button>
                       </div>
                       <div className="sx-inset">

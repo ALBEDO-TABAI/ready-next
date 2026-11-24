@@ -7,6 +7,7 @@ import {
   WORKBENCH_TAB_MAX_WIDTH,
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
+import { scrollBehavior } from '../../design/next/motion'
 
 export interface DocumentTabRailItem {
   id: string
@@ -88,7 +89,7 @@ export default function DocumentTabRail({
 
     const frame = requestAnimationFrame(() => {
       const targetLeft = Math.max(0, element.scrollWidth - element.clientWidth)
-      element.scrollTo({ left: targetLeft, behavior: 'smooth' })
+      element.scrollTo({ left: targetLeft, behavior: scrollBehavior() })
       checkOverflow()
     })
 
@@ -123,7 +124,7 @@ export default function DocumentTabRail({
           {showLeftArrow && (
             <button
               type="button"
-              onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
+              onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: scrollBehavior() })}
               className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--rn-fill-2)]"
             >
               <ChevronLeft style={{ width: 12, height: 12 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />
@@ -167,7 +168,7 @@ export default function DocumentTabRail({
                       onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[9px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
+                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[9px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-(--rn-d-1)"
                       style={{
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
@@ -247,7 +248,7 @@ export default function DocumentTabRail({
           {showRightArrow && (
             <button
               type="button"
-              onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+              onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: scrollBehavior() })}
               className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--rn-fill-2)]"
             >
               <ChevronRight style={{ width: 12, height: 12 }} className="text-[var(--rn-ink-3)]" strokeWidth={2} />

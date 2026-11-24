@@ -94,7 +94,7 @@
      along each edge changes one dimension. Faint on the hovered card, full ink on the picked one and on the hull. */
   .rn-canvas .canvas-arc { position: absolute; width: 24px; height: 24px; z-index: 2; }
   .rn-canvas .canvas-arc svg { display: block; overflow: visible; pointer-events: none; }
-  .rn-canvas .canvas-arc path { fill: none; stroke: var(--rn-ink-4); stroke-width: 2.5; stroke-linecap: round; transition: stroke 120ms var(--rn-ease-std); }
+  .rn-canvas .canvas-arc path { fill: none; stroke: var(--rn-ink-4); stroke-width: 2.5; stroke-linecap: round; transition: stroke var(--rn-d-1) var(--rn-ease-std); }
   .rn-canvas .canvas-arc:hover path, .rn-canvas .canvas-card[data-selected='true'] .canvas-arc path, .rn-canvas .canvas-hull-handles .canvas-arc path { stroke: var(--rn-ink); }
   .rn-canvas .canvas-arc[data-corner='nw'] { left: -8px; top: -8px; cursor: nwse-resize; }
   .rn-canvas .canvas-arc[data-corner='ne'] { right: -8px; top: -8px; cursor: nesw-resize; }
@@ -117,7 +117,7 @@
   .rn-canvas .canvas-clusters, .rn-canvas .canvas-edges, .rn-canvas .canvas-overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
   /* A cluster's outline appears only round the hovered card's cluster, and fades (Stillroom); none during a gesture. */
   .rn-canvas .canvas-clusters { fill: var(--rn-fill); stroke: var(--rn-hair-2); stroke-width: .5; }
-  .rn-canvas .canvas-clusters path { opacity: 0; transition: opacity 200ms var(--rn-ease-std); }
+  .rn-canvas .canvas-clusters path { opacity: 0; transition: opacity var(--rn-d-2) var(--rn-ease-std); }
   .rn-canvas .canvas-clusters path[data-on] { opacity: 1; }
   .rn-canvas[data-gesture] .canvas-clusters path { opacity: 0; }
   .rn-canvas .canvas-edges { fill: none; stroke: var(--rn-ink-2); stroke-width: 2; }
