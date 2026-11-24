@@ -88,15 +88,29 @@
   .rn-check__box[aria-checked='true'] svg, .rn-check__box[aria-checked='mixed'] svg { opacity: 1; transform: none; }
   .rn-check__box:disabled { opacity: .45; cursor: default; }
 
-  .rn-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); }
+  .rn-seg { position: relative; display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--rn-r-pill); background: var(--rn-fill-2); }
+  /* One capsule for the whole track (Segmented places it): a change of choice slides it to the new item, the way the
+     choice went (M2, a moving selection: d-3 out, no overshoot). It is out of flow, so its width changing moves nothing
+     else (M4 allowlist). */
+  .rn-seg__thumb {
+    position: absolute; top: 0; left: 0; width: var(--rn-seg-w, 0); height: var(--rn-seg-h, 0); translate: var(--rn-seg-x, 0) var(--rn-seg-y, 0);
+    border-radius: var(--rn-r-pill); background: var(--rn-capsule-on-bg); box-shadow: var(--rn-capsule-on-shadow); opacity: 0; pointer-events: none;
+    transition: translate var(--rn-d-3) var(--rn-ease-out), width var(--rn-d-3) var(--rn-ease-out);
+  }
+  .rn-seg[data-seg-placed] > .rn-seg__thumb { opacity: 1; }
   .rn-seg__item {
-    height: var(--rn-control-h); padding: 0 12px; border: 0; border-radius: var(--rn-r-pill); background: transparent;
+    position: relative; height: var(--rn-control-h); padding: 0 12px; border: 0; border-radius: var(--rn-r-pill); background: transparent;
     font: 400 var(--rn-t-body)/1 var(--rn-font-ui); color: var(--rn-ink-2); cursor: pointer;
     transition: background-color var(--rn-d-2) var(--rn-ease-std), color var(--rn-d-2) var(--rn-ease-std), box-shadow var(--rn-d-2) var(--rn-ease-std);
   }
   .rn-seg__item:hover { color: var(--rn-ink); }
   /* the selected item is an ink capsule (light: ink glass; dark: translucent white) */
   .rn-seg__item[aria-checked='true'] { background: var(--rn-capsule-on-bg); color: var(--rn-capsule-on-ink); font-weight: 500; box-shadow: var(--rn-capsule-on-shadow); }
+  /* placed, the thumb is the capsule; the item keeps only its ink, which turns as the thumb arrives */
+  .rn-seg[data-seg-placed] > .rn-seg__item { background: transparent; box-shadow: none; transition: color var(--rn-d-2) var(--rn-ease-std); }
+  .rn-seg__label { display: inline-grid; justify-items: center; }
+  .rn-seg__label > span, .rn-seg__label::after { grid-area: 1 / 1; }
+  .rn-seg__label::after { content: attr(data-reserve); font-weight: 500; visibility: hidden; }
   /* an item that is only an icon: a round-ended slot as wide as it is tall and a half */
   .rn-seg__item[data-icon] { display: inline-grid; place-items: center; min-width: calc(var(--rn-control-h) + 6px); padding: 0 8px; }
   .rn-seg__item[data-icon] svg { width: 15px; height: 15px; stroke-width: 1.9; }
@@ -287,7 +301,7 @@
   @media (prefers-reduced-motion: reduce) {
     .rn-skeleton { animation: none; }
     .rn-glyph-in { animation-name: rn-fade-in; }
-    .rn-switch, .rn-switch::after, .rn-seg__item, .rn-btn, .rn-icon-btn, button.rn-chip, .rn-ref { transition: none; }
+    .rn-switch, .rn-switch::after, .rn-seg__item, .rn-seg[data-seg-placed] > .rn-seg__item, .rn-seg__thumb, .rn-btn, .rn-icon-btn, button.rn-chip, .rn-ref { transition: none; }
     :is(.rn-btn, .rn-icon-btn):active:not(:disabled) { transform: none; }
   }
 }

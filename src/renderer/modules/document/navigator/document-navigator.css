@@ -17,15 +17,51 @@
   font-size: 12px;
 }
 
-.document-navigator__view {
+/* The two views share one place; while they change, the leaving one lies over the other and the stage clips the slide. */
+.document-navigator__stage {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
 }
 
+.document-navigator__stage:has(> [data-view-motion]) {
+  overflow-x: clip;
+}
+
+.document-navigator__view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  transition: transform var(--rn-d-2) var(--rn-ease-out), opacity var(--rn-d-2) var(--rn-ease-out);
+}
+
 .document-navigator__view[hidden] {
   display: none;
+}
+
+/* 页面 → 文件 (forward, rightwards in the switch): the new view comes in from the right and the old one leaves to the
+   left; back, the reverse. Same distances and times as a mode change (M2), on the horizontal axis; reduced motion
+   leaves only the fade. */
+@starting-style {
+  .document-navigator__view[data-view-motion='enter'] { transform: translate3d(var(--rn-shift-3), 0, 0); opacity: 0; }
+  .document-navigator__view[data-view-motion='enter'][data-view-direction='backward'] { transform: translate3d(calc(-1 * var(--rn-shift-3)), 0, 0); }
+}
+
+.document-navigator__view[data-view-motion='leave'] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(calc(-.5 * var(--rn-shift-3)), 0, 0);
+  transition-duration: var(--rn-d-1);
+  transition-timing-function: var(--rn-ease-std);
+}
+
+.document-navigator__view[data-view-motion='leave'][data-view-direction='backward'] {
+  transform: translate3d(calc(.5 * var(--rn-shift-3)), 0, 0);
 }
 
 .document-navigator__files {

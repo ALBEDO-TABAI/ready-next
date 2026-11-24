@@ -130,6 +130,56 @@ test('Segmented has one tab stop and arrows select, focus and wrap in both direc
   await h.click(items[2]); check(2)
 })
 
+test('Segmented slides one capsule to the chosen item, and the item draws its own until the capsule can be placed', async t => {
+  const h = await mountPrimitives(t)
+  function Example() {
+    const [value, setValue] = useState('list')
+    return <Segmented label="视图" value={value} onChange={setValue} options={[{ value: 'list', label: '列表' }, { value: 'board', label: '看板' }, { value: 'calendar', label: '日历' }]} />
+  }
+  await h.render(<Example />)
+  const track = h.get<HTMLElement>('[role="radiogroup"]')
+  const thumb = h.get<HTMLElement>('.rn-seg__thumb')
+  const items = [...h.body.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+  // Not laid out (JSDOM): nothing is placed, so the chosen item keeps its own capsule.
+  assert.equal(track.hasAttribute('data-seg-placed'), false)
+  assert.equal(thumb.getAttribute('aria-hidden'), 'true')
+
+  // Lay the items out: 40px wide, 2px padding and gaps.
+  const proto = h.dom.window.HTMLElement.prototype
+  const saved = (['offsetWidth', 'offsetHeight', 'offsetLeft', 'offsetTop'] as const).map(name => [name, Object.getOwnPropertyDescriptor(proto, name)] as const)
+  t.after(() => { for (const [name, descriptor] of saved) if (descriptor) Object.defineProperty(proto, name, descriptor) })
+  const at = (element: HTMLElement) => items.indexOf(element as HTMLButtonElement)
+  const metric = (value: (index: number) => number) => ({ configurable: true, get(this: HTMLElement) { const index = at(this); return index < 0 ? 0 : value(index) } })
+  Object.defineProperty(proto, 'offsetWidth', metric(() => 40))
+  Object.defineProperty(proto, 'offsetHeight', metric(() => 28))
+  Object.defineProperty(proto, 'offsetLeft', metric(index => 2 + index * 42))
+  Object.defineProperty(proto, 'offsetTop', metric(() => 2))
+
+  const styleWrites: string[] = []
+  // Each record's old value is the style before that write, so a passing `transition: none` shows up.
+  const observer = new h.dom.window.MutationObserver(records => { for (const record of records) styleWrites.push(record.oldValue ?? '') })
+  observer.observe(thumb, { attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+  t.after(() => observer.disconnect())
+  const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+  // The first placement is put there without travelling.
+  await h.click(items[1]); await flush()
+  assert.equal(track.hasAttribute('data-seg-placed'), true)
+  assert.equal(track.style.getPropertyValue('--rn-seg-x'), '44px')
+  assert.equal(track.style.getPropertyValue('--rn-seg-w'), '40px')
+  assert.ok(styleWrites.some(style => /transition:\s*none/.test(style)), 'the first placement does not travel')
+  assert.equal(thumb.style.transition, '')
+
+  // A later choice travels: the thumb's transition is left alone.
+  styleWrites.length = 0
+  await h.click(items[2]); await flush()
+  assert.equal(track.style.getPropertyValue('--rn-seg-x'), '86px')
+  assert.deepEqual(styleWrites, [])
+  // The label reserves its chosen weight, and its text is read once.
+  assert.equal(items[2].querySelector('.rn-seg__label')?.getAttribute('data-reserve'), '日历')
+  assert.equal(items[2].textContent, '日历')
+})
+
 test('Tabs support arrows, Home/End, Enter/Space and close without selecting the closed tab', async t => {
   const h = await mountPrimitives(t)
   const changes: string[] = [], closed: string[] = []

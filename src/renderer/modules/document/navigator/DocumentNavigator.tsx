@@ -9,6 +9,7 @@ import { useDocumentNavigator, type DocumentNavigatorView } from './useDocumentN
 import { InkSidebar } from '../ink/InkSidebar'
 import { mountFolder } from '../mountFolder'
 import { adoptIntoLibrary } from './adopt'
+import { useSceneMotion } from '../../workbench/scene-motion'
 import type { ContextMenuItem } from '../../../components/layout/ContextMenu'
 import type { FileItem } from '../../../stores/useWorkspace'
 import './document-navigator.css'
@@ -23,6 +24,7 @@ const VIEW_OPTIONS: { value: DocumentNavigatorView; label: string }[] = [
   { value: 'pages', label: '页面' },
   { value: 'files', label: '文件' },
 ]
+const VIEW_ORDER = VIEW_OPTIONS.map(option => option.value)
 
 export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   /** The library alone: other folders are files, listed once under 文件夹 (M4). */
@@ -40,6 +42,20 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
   const adoptItem = useCallback((item: FileItem): ContextMenuItem[] => vaultRoot
     ? [{ id: 'adopt', label: '收进资料库…', onClick: () => { void adoptIntoLibrary(item.path) } }] : [], [vaultRoot])
   const [mountError, setMountError] = useState<string | null>(null)
+  // Switching the view moves the lists on the switch's own axis (motion language M2): 页面 → 文件 slides left, and back.
+  // Shown and moving are read from the same state, so the arriving view is marked in the commit that shows it.
+  const motion = useSceneMotion(view, { animate: true, order: VIEW_ORDER })
+  const viewMotion = (key: DocumentNavigatorView) => {
+    const shown = motion.current === key
+    const leftAs = shown ? undefined : motion.leaving[key]
+    const move = leftAs ? 'leave' : shown && motion.entering ? 'enter' : undefined
+    return {
+      hidden: !shown && !leftAs,
+      inert: leftAs ? true : undefined,
+      'data-view-motion': move,
+      'data-view-direction': move ? leftAs ?? motion.direction : undefined,
+    }
+  }
 
   const mount = async () => {
     setMountError(null)
@@ -53,7 +69,8 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
         <span className="shell-navigator__title" title={vaultRoot ?? undefined}>内容管理</span>
         <Segmented label="资料库视角" value={view} onChange={setView} options={VIEW_OPTIONS} />
       </div>
-      <div className="document-navigator__view ink-scope" hidden={view !== 'pages'}>
+      <div className="document-navigator__stage">
+      <div className="document-navigator__view ink-scope" {...viewMotion('pages')}>
         <InkSidebar
           roots={roots}
           onShowFiles={onShowFiles}
@@ -66,10 +83,11 @@ export default function DocumentNavigator({ roots, visible, onShowFiles }: {
           ) : undefined}
         />
       </div>
-      <div className="document-navigator__view" hidden={view !== 'files'}>
+      <div className="document-navigator__view" {...viewMotion('files')}>
         <FilesPanel isVisible={visible && view === 'files'}>
           {slots => <div className="document-navigator__files">{slots.body}</div>}
         </FilesPanel>
+      </div>
       </div>
     </div>
   )

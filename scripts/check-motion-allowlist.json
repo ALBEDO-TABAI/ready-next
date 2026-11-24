@@ -1,5 +1,11 @@
 [
   {
+    "file": "src/renderer/components/ui/primitives.css",
+    "kind": "css-layout",
+    "max": 1,
+    "reason": "The segmented control's capsule: an out-of-flow leaf (position: absolute) whose width follows the chosen item, so its round ends stay round (a scale would squash them); nothing else is laid out again."
+  },
+  {
     "file": "src/renderer/modules/document/database/database.css",
     "kind": "css-easing",
     "max": 2,
@@ -10,18 +16,6 @@
     "kind": "ts-literal",
     "max": 1,
     "reason": "The book-opening WAAPI choreography (650ms, reduced motion 0)."
-  },
-  {
-    "file": "src/renderer/modules/library/library.css",
-    "kind": "css-duration",
-    "max": 2,
-    "reason": "The library’s open-book move and cover turn."
-  },
-  {
-    "file": "src/renderer/modules/library/library.css",
-    "kind": "css-easing",
-    "max": 1,
-    "reason": "The library’s open-book move and cover turn."
   },
   {
     "file": "src/renderer/modules/library/reader.css",
